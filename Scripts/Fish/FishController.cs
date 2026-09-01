@@ -53,8 +53,12 @@ namespace ViitorCloud.FishAquarium.Fish {
             ResolveComponentReferences();
         }
 
-        /// <summary> Wires the fish up and starts the spawn animation. Called by FishFactory immediately after Instantiate. </summary>
-        public void Initialize(FishData fishData, AquariumConfig aquariumConfig, AquariumBounds aquariumBounds, AquariumManager manager, int spawnOrder, Vector2 initialHeading) {
+        /// <summary>
+        /// Wires the fish up and starts the spawn animation. Called by FishFactory immediately after Instantiate.
+        /// skipEntranceAnimation is for replayed captures, which are restoring fish the aquarium already had
+        /// rather than announcing an arrival, so they appear at full size and opacity straight away.
+        /// </summary>
+        public void Initialize(FishData fishData, AquariumConfig aquariumConfig, AquariumBounds aquariumBounds, AquariumManager manager, int spawnOrder, Vector2 initialHeading, bool skipEntranceAnimation) {
             if (fishData == null || aquariumConfig == null || aquariumBounds == null) {
                 Debug.LogError("FishController: Initialize called with missing dependencies.");
                 return;
@@ -84,9 +88,16 @@ namespace ViitorCloud.FishAquarium.Fish {
             movement.Initialize(this, Data, config, bounds, manager, spriteRenderer, initialHeading);
             fishAnimator.Initialize(Data, config);
 
-            State = FishLifecycleState.Spawning;
-            animationTimer = 0f;
-            ApplyVisualState(0f);
+            if (skipEntranceAnimation) {
+                State = FishLifecycleState.Swimming;
+                animationTimer = config.SpawnAnimationDuration;
+                ApplyVisualState(1f);
+            } else {
+                State = FishLifecycleState.Spawning;
+                animationTimer = 0f;
+                ApplyVisualState(0f);
+            }
+
             initialised = true;
         }
 

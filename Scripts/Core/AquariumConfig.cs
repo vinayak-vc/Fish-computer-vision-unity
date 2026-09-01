@@ -102,6 +102,24 @@ namespace ViitorCloud.FishAquarium.Core {
         [SerializeField] private int foregroundSortingOrder = 200;
         [SerializeField] private int backgroundSortingOrder = 20;
 
+        [Header("Socket.IO Source")]
+        [Tooltip("Receive fish from the Python capture station over Socket.IO. Independent of the folder watcher; both can run at once.")]
+        [SerializeField] private bool socketSourceEnabled = true;
+        [SerializeField] private bool socketAutoConnect = true;
+        [SerializeField] private string socketHost = "127.0.0.1";
+        [SerializeField] private int socketPort = 8765;
+        [Tooltip("Socket.IO namespace. The capture station uses the default namespace.")]
+        [SerializeField] private string socketNamespace = "/";
+        [SerializeField] private string socketEventName = "fish_captured";
+        [SerializeField] private SocketTransportMode socketTransport = SocketTransportMode.PollingThenUpgradeToWebSocket;
+        [Tooltip("0 or below means keep retrying forever, which is what an unattended installation wants.")]
+        [SerializeField] private int socketReconnectionAttempts = 0;
+        [SerializeField] private float socketReconnectionDelaySeconds = 1f;
+        [SerializeField] private float socketReconnectionDelayMaxSeconds = 10f;
+        [SerializeField] private float socketConnectTimeoutSeconds = 20f;
+        [Tooltip("Schema the payload contract was written against. A different value on the wire is logged once as a warning.")]
+        [SerializeField] private int expectedSchemaVersion = 1;
+
         [Header("Debug")]
         [SerializeField] private bool debugOverlayVisibleOnStart = true;
         [SerializeField] private bool drawAquariumBoundsGizmo = true;
@@ -343,6 +361,54 @@ namespace ViitorCloud.FishAquarium.Core {
             get { return drawAquariumBoundsGizmo; }
         }
 
+        public bool SocketSourceEnabled {
+            get { return socketSourceEnabled; }
+        }
+
+        public bool SocketAutoConnect {
+            get { return socketAutoConnect; }
+        }
+
+        public string SocketHost {
+            get { return socketHost; }
+        }
+
+        public int SocketPort {
+            get { return socketPort; }
+        }
+
+        public string SocketNamespace {
+            get { return socketNamespace; }
+        }
+
+        public string SocketEventName {
+            get { return socketEventName; }
+        }
+
+        public SocketTransportMode SocketTransport {
+            get { return socketTransport; }
+        }
+
+        public int SocketReconnectionAttempts {
+            get { return socketReconnectionAttempts; }
+        }
+
+        public float SocketReconnectionDelaySeconds {
+            get { return socketReconnectionDelaySeconds; }
+        }
+
+        public float SocketReconnectionDelayMaxSeconds {
+            get { return socketReconnectionDelayMaxSeconds; }
+        }
+
+        public float SocketConnectTimeoutSeconds {
+            get { return socketConnectTimeoutSeconds; }
+        }
+
+        public int ExpectedSchemaVersion {
+            get { return expectedSchemaVersion; }
+        }
+
         public bool IsDevelopmentMode {
             get { return runtimeMode == AquariumRuntimeMode.Development; }
         }
@@ -355,6 +421,12 @@ namespace ViitorCloud.FishAquarium.Core {
 
             string root = inputFolderRoot == InputFolderRoot.PersistentData ? Application.persistentDataPath : Application.streamingAssetsPath;
             return NormalizePath(Path.Combine(root, inputFolderRelativePath));
+        }
+
+        /// <summary> Socket.IO endpoint of the capture station, built from the configured host and port. </summary>
+        public string ResolveSocketUrl() {
+            string host = string.IsNullOrWhiteSpace(socketHost) ? "127.0.0.1" : socketHost.Trim();
+            return "http://" + host + ":" + socketPort + "/socket.io/";
         }
 
         /// <summary> Absolute path of the development-only sample fish folder under StreamingAssets. </summary>
@@ -405,6 +477,19 @@ namespace ViitorCloud.FishAquarium.Core {
             depthScaleInfluence = Mathf.Clamp01(depthScaleInfluence);
             depthAlphaInfluence = Mathf.Clamp01(depthAlphaInfluence);
             depthSpeedInfluence = Mathf.Clamp01(depthSpeedInfluence);
+
+            socketPort = Mathf.Clamp(socketPort, 1, 65535);
+            socketReconnectionDelaySeconds = Mathf.Max(0.1f, socketReconnectionDelaySeconds);
+            socketReconnectionDelayMaxSeconds = Mathf.Max(socketReconnectionDelaySeconds, socketReconnectionDelayMaxSeconds);
+            socketConnectTimeoutSeconds = Mathf.Max(1f, socketConnectTimeoutSeconds);
+
+            if (string.IsNullOrWhiteSpace(socketNamespace)) {
+                socketNamespace = "/";
+            }
+
+            if (string.IsNullOrWhiteSpace(socketEventName)) {
+                socketEventName = "fish_captured";
+            }
 
             if (string.IsNullOrWhiteSpace(fileSearchPattern)) {
                 fileSearchPattern = "*.png";

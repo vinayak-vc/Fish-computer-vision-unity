@@ -116,6 +116,39 @@ namespace ViitorCloud.FishAquarium.Fish {
             return sprite;
         }
 
+        /// <summary>
+        /// Builds a sprite from PNG bytes already in memory, for payloads that arrive over the network and
+        /// are never written to disk. Same decoding rules as the file path: RGBA32 so alpha survives,
+        /// clamped wrapping so the silhouette has no edge bleed, and the decode result is checked.
+        /// </summary>
+        public static bool TryCreateSpriteFromBytes(byte[] bytes, string spriteName, float pixelsPerUnit, bool markNonReadable, out Sprite sprite, out string error) {
+            sprite = null;
+
+            if (bytes == null || bytes.Length == 0) {
+                error = "no image data";
+                return false;
+            }
+
+            if (!HasPngSignature(bytes)) {
+                error = "payload is not a valid PNG";
+                return false;
+            }
+
+            Texture2D texture;
+            if (!TryCreateTexture(bytes, spriteName, markNonReadable, out texture, out error)) {
+                return false;
+            }
+
+            sprite = CreateSprite(texture, spriteName, pixelsPerUnit);
+            if (sprite == null) {
+                DestroyObject(texture);
+                error = "sprite creation failed";
+                return false;
+            }
+
+            return true;
+        }
+
         /// <summary> Reads, validates and converts a PNG file in one call. </summary>
         public static bool TryLoadSprite(string absolutePath, float pixelsPerUnit, bool markNonReadable, out Sprite sprite, out string error) {
             sprite = null;

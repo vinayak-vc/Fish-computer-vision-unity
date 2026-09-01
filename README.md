@@ -178,3 +178,109 @@ this first version:
   schooling, following or avoidance rules would go.
 - **Caustics.** `WaterEffect` owns the light-shaft renderers and is where a
   scrolling caustics material would be layered in.
+
+## Socket.IO capture feed
+
+The aquarium takes fish from two independent sources. The folder watcher above reads PNGs from disk;
+this one receives them from the Python capture station over Socket.IO. Both feed the same spawner,
+so population limits, texture lifetime and swimming behaviour are shared.
+
+### Running it against the Python app
+
+1. Start the capture station: `python main.py --source image --input samples/real/photo_b.jpg`
+2. Open `Scenes/Aquarium.unity` and press Play.
+
+Unity connects on start, and the Console shows the state:
+
+```
+SocketFishIngestService: connecting to http://127.0.0.1:8765/socket.io/ (namespace /, event fish_captured)
+SocketFishIngestService: connected to http://127.0.0.1:8765/socket.io/. Expecting a replay burst of recent captures.
+```
+
+The capture app should show its connected-consumer count go up. Order does not matter: if Unity starts
+first, or the capture app is restarted later, the client keeps retrying and reconnects on its own.
+
+### Testing without Python
+
+Press **F5** to inject one synthetic capture, or **F6** for a burst of ten marked as replays. Both build
+the contract JSON by hand, hand it to the real decode path, and log the main-thread cost. Useful for
+proving the Unity half in isolation: if F5 spawns a fish but a live capture does not, the problem is the
+connection, not the decode.
+
+### Inspector settings
+
+All on `Settings/AquariumConfig.asset`, under **Socket.IO Source**:
+
+| Setting | Default | Notes |
+| --- | --- | --- |
+| `Socket Source Enabled` | on | Turn off to run folder-only |
+| `Socket Auto Connect` | on | Off means calling `Connect()` yourself |
+| `Socket Host` / `Socket Port` | `127.0.0.1` / `8765` | Builds `http://host:port/socket.io/` |
+| `Socket Namespace` | `/` | |
+| `Socket Event Name` | `fish_captured` | Also drives the parser fast path |
+| `Socket Transport` | `PollingThenUpgradeToWebSocket` | Handshakes over HTTP and upgrades. `WebSocketOnly` skips the upgrade |
+| `Socket Reconnection Attempts` | `0` | 0 or below means retry forever |
+| `Socket Reconnection Delay` / `Max` | `1s` / `10s` | |
+| `Expected Schema Version` | `1` | A different value on the wire is warned about once |
+
+Population cap (`Max Fish Count`), `Sprite Pixels Per Unit` and `Max Fish Loads Per Frame` are in the
+sections above and apply to both sources.
+
+### Where things live in the scene
+
+Nothing new to place by hand — `Scenes/Aquarium.unity` is already wired:
+
+- `FishSystem` carries `SocketFishIngestService` alongside the existing `FishFactory`.
+- `DebugCanvas` carries `SocketPayloadSelfTest` for the F5/F6 keys.
+- `Prefabs/Fish.prefab` is the spawned fish; the sprite is assigned at runtime, so it needs no artwork.
+
+### How a capture becomes a fish
+
+```
+BestHTTP SocketIO3            main thread, ~0.14 ms for a 1 MB payload
+  -> RawFishPayloadParser     framing scan + one substring, no JSON parsing
+  -> FishPayloadDecodeQueue   worker thread: LitJson parse + base64 decode
+  -> FishTextureLoader        main thread: RGBA32 texture, clamped, LoadImage return checked
+  -> FishSpriteCache          reference-counted, keyed by capture id
+  -> FishFactory              size normalisation, behaviour profile, spawn
+```
+
+Live arrivals get the entrance animation. Replays skip it and are placed anywhere in the aquarium
+rather than swimming in from an edge, because they are restoring fish that were already there.
+
+### Deviations from the brief, and why
+
+**Unity 6000.3.9f1, not 2021.3 LTS.** That is what the project is on. Built-in render pipeline is
+active: the URP asset referenced in GraphicsSettings is a dangling GUID, so URP never loads. Sprites
+render through `Sprites/Default`, which is correct under either pipeline, so nothing here depends on it.
+
+**BestHTTP 2.7.0 using the `SocketIO3` namespace.** The plugin ships both `Source/SocketIO` (Engine.IO 3)
+and `Source/SocketIO.3` (Engine.IO 4). Only the latter can talk to python-socketio 5.x. If the connection
+ever fails to negotiate, check that nothing has been switched to the older namespace.
+
+**A custom Socket.IO parser was added.** This is the one significant departure. Subscribing the obvious way,
+`socket.On<FishCaptureMessage>(...)`, makes BestHTTP deserialise the payload on the main thread, and its
+stock parser does it three times over: the whole payload into a `List<object>`, then the argument
+re-serialised back to JSON, then parsed again into the target type. Measured in this project, even the
+single-pass case costs about 24 microseconds per KB, so a documented one-megabyte capture blocks the main
+thread for roughly 25 ms and the ten-event replay burst freezes it for a quarter of a second. That fails
+two acceptance criteria outright. `RawFishPayloadParser` instead does the cheap framing scan, lifts the
+argument out as a substring, and lets a worker thread do the parsing: **0.14 ms on the main thread instead
+of 25.7 ms** for a 1.1 MB frame. Any frame it does not recognise falls through to the stock parser
+untouched, and eleven tests pin down exactly which frames it claims.
+
+**Spawner and fish behaviour were reused, not rewritten.** The brief lists them as deliverables, but this
+project already had a tested spawner, population cap, texture-lifetime scheme and swimming behaviour from
+the folder-watcher work. A second parallel stack would have meant two population caps and two texture
+lifetimes to keep in sync. Agreed before building.
+
+**No duplicate suppression.** Agreed before building. Every event carries a unique `id`, so id-based dedupe
+would not stop the repeat-photo case anyway, and content hashing may be handled server-side later. The
+population cap bounds the effect: the same drawing simply respawns and old copies are removed.
+
+**Repeated connection errors are collapsed.** A capture station that is not running yet produces the same
+error once a second, which is thousands of identical Console lines an hour. The first is logged as an
+error, repeats are counted and summarised every 30 seconds, and the counter resets on connect.
+
+**`confidence` is carried but never gates anything**, as instructed. There is a test asserting that a
+payload with confidence 0.01 still spawns.

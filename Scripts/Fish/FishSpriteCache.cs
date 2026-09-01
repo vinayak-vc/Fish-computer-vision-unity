@@ -56,6 +56,40 @@ namespace ViitorCloud.FishAquarium.Fish {
             return true;
         }
 
+        /// <summary>
+        /// Same contract as TryAcquire, for a payload that arrived over the network. The key is the capture
+        /// id rather than a file path, so socket fish get the identical reference-counted texture lifetime.
+        /// </summary>
+        public static bool TryAcquireFromBytes(string key, byte[] pngBytes, float pixelsPerUnit, out Sprite sprite, out string error) {
+            sprite = null;
+            error = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(key)) {
+                error = "empty sprite key";
+                return false;
+            }
+
+            CacheEntry existing;
+            if (entries.TryGetValue(key, out existing) && existing.Sprite != null) {
+                existing.ReferenceCount++;
+                sprite = existing.Sprite;
+                return true;
+            }
+
+            Sprite loaded;
+            if (!FishTextureLoader.TryCreateSpriteFromBytes(pngBytes, key, pixelsPerUnit, true, out loaded, out error)) {
+                return false;
+            }
+
+            CacheEntry entry = new CacheEntry();
+            entry.Sprite = loaded;
+            entry.ReferenceCount = 1;
+            entries[key] = entry;
+
+            sprite = loaded;
+            return true;
+        }
+
         /// <summary> Drops one reference. The sprite and its texture are destroyed when the count reaches zero. </summary>
         public static void Release(string absolutePath) {
             if (string.IsNullOrWhiteSpace(absolutePath)) {

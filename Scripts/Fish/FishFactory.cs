@@ -33,6 +33,14 @@ namespace ViitorCloud.FishAquarium.Fish {
 
         /// <summary> Creates one fish from an already-loaded sprite. Returns null when the aquarium refused it. </summary>
         public FishController CreateFish(Sprite sprite, string sourceFilePath) {
+            return CreateFish(sprite, sourceFilePath, false);
+        }
+
+        /// <summary>
+        /// As above, but a silent fish skips the entrance animation and is placed anywhere in the aquarium
+        /// rather than swimming in from an edge. Used for replayed captures.
+        /// </summary>
+        public FishController CreateFish(Sprite sprite, string sourceFilePath, bool spawnSilently) {
             if (sprite == null) {
                 Debug.LogError("FishFactory: CreateFish called with a null sprite.");
                 return null;
@@ -54,7 +62,7 @@ namespace ViitorCloud.FishAquarium.Fish {
             data.SetWorldScale(CalculateWorldScale(sprite));
 
             Vector2 initialHeading;
-            data.SetSpawnPosition(ChooseSpawnPosition(out initialHeading));
+            data.SetSpawnPosition(ChooseSpawnPosition(out initialHeading, spawnSilently));
 
             FishController fish = InstantiateFish();
             if (fish == null) {
@@ -64,7 +72,7 @@ namespace ViitorCloud.FishAquarium.Fish {
             fish.name = "Fish_" + data.Id.ToString("D3") + " (" + fileName + ")";
             fish.transform.SetParent(aquariumManager.FishContainer, false);
 
-            fish.Initialize(data, config, bounds, aquariumManager, aquariumManager.ReserveSpawnOrder(), initialHeading);
+            fish.Initialize(data, config, bounds, aquariumManager, aquariumManager.ReserveSpawnOrder(), initialHeading, spawnSilently);
             aquariumManager.RegisterFish(fish);
 
             return fish;
@@ -79,8 +87,8 @@ namespace ViitorCloud.FishAquarium.Fish {
             return FishSizeNormalizer.CalculateUniformScale(pixelWidth, pixelHeight, sprite.pixelsPerUnit, targetLongestSide);
         }
 
-        private Vector2 ChooseSpawnPosition(out Vector2 initialHeading) {
-            if (config.SpawnStrategy == FishSpawnStrategy.EdgeEntry) {
+        private Vector2 ChooseSpawnPosition(out Vector2 initialHeading, bool forceInsideBounds) {
+            if (!forceInsideBounds && config.SpawnStrategy == FishSpawnStrategy.EdgeEntry) {
                 Vector2 inward;
                 Vector2 entryPoint = bounds.RandomEdgeEntryPoint(config.BoundsPadding, out inward);
                 initialHeading = (inward + new Vector2(0f, UnityEngine.Random.Range(-0.25f, 0.25f))).normalized;
