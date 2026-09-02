@@ -5,21 +5,30 @@ using UnityEngine;
 
 using ViitorCloud.FishAquarium.Aquarium;
 using ViitorCloud.FishAquarium.Fish;
+using ViitorCloud.FishAquarium.Input;
 
 namespace ViitorCloud.FishAquarium.Core {
     /// <summary>
     /// Owns the live fish population: registration, the maximum-count policy, removal and the single
     /// per-frame tick that advances every fish. Loading PNGs is deliberately not its job.
+    ///
+    /// It also holds the two things every fish needs to react to the visitor - the pointer source and the
+    /// ripple field - because the fish already talk to the manager for neighbour queries, and giving the
+    /// interaction layer its own Update would split the simulation across two frame orders for no gain.
     /// </summary>
     public sealed class AquariumManager : MonoBehaviour {
         [SerializeField] private AquariumConfig config;
         [SerializeField] private AquariumBounds bounds;
         [SerializeField] private Transform fishContainer;
+        [Tooltip("Must be a component implementing IPointerSource, normally MousePointerSource. Leave empty to run the tank with no visitor interaction at all.")]
+        [SerializeField] private MonoBehaviour pointerSourceBehaviour;
 
         private readonly List<FishController> activeFish = new List<FishController>();
         private readonly List<FishController> completedRemovals = new List<FishController>();
 
         private Vector2[] positionSnapshot = new Vector2[0];
+        private IPointerSource pointerSource;
+        private RippleField ripples;
         private int snapshotCount;
         private int nextFishId = 1;
         private int nextSpawnOrder = 1;
@@ -41,6 +50,19 @@ namespace ViitorCloud.FishAquarium.Core {
 
         public IReadOnlyList<FishController> ActiveFish {
             get { return activeFish; }
+        }
+
+        /// <summary>
+        /// The visitor, or null when this installation has no pointer wired up. Fish must treat null and
+        /// IsAvailable false the same way: carry on swimming, react to nothing.
+        /// </summary>
+        public IPointerSource Pointer {
+            get { return pointerSource; }
+        }
+
+        /// <summary> Click shockwaves currently decaying in the tank. Never null. </summary>
+        public RippleField Ripples {
+            get { return ripples; }
         }
 
         /// <summary> Fish that are not already fading out. This is the number the maximum-count policy applies to. </summary>
@@ -68,11 +90,18 @@ namespace ViitorCloud.FishAquarium.Core {
             if (bounds == null) {
                 Debug.LogError("AquariumManager: no AquariumBounds assigned; fish would have nowhere to swim.");
             }
+
+            ResolvePointerSource();
+            BuildRippleField();
         }
 
         private void OnEnable() {
             if (bounds != null) {
                 bounds.BoundsChanged += HandleBoundsChanged;
+            }
+
+            if (pointerSource != null) {
+                pointerSource.Pressed += HandlePointerPressed;
             }
         }
 
@@ -80,11 +109,16 @@ namespace ViitorCloud.FishAquarium.Core {
             if (bounds != null) {
                 bounds.BoundsChanged -= HandleBoundsChanged;
             }
+
+            if (pointerSource != null) {
+                pointerSource.Pressed -= HandlePointerPressed;
+            }
         }
 
         private void Update() {
             float deltaTime = Time.deltaTime;
 
+            ripples.Tick(deltaTime);
             RebuildPositionSnapshot();
 
             for (int i = 0; i < activeFish.Count; i++) {
@@ -204,6 +238,40 @@ namespace ViitorCloud.FishAquarium.Core {
             }
 
             return accumulated;
+        }
+
+        private void ResolvePointerSource() {
+            if (pointerSourceBehaviour == null) {
+                return;
+            }
+
+            pointerSource = pointerSourceBehaviour as IPointerSource;
+
+            if (pointerSource == null) {
+                Debug.LogError("AquariumManager: the component assigned as the pointer source does not implement IPointerSource; the tank will run with no visitor interaction.");
+            }
+        }
+
+        /// <summary>
+        /// Built once, from the config, because ripple tuning is authored rather than changed at runtime.
+        /// Always constructed, even with interaction switched off, so nothing downstream has to null-check
+        /// it on the hot path.
+        /// </summary>
+        private void BuildRippleField() {
+            if (config == null) {
+                ripples = new RippleField(1, 1f, 0f, 1f, 0f);
+                return;
+            }
+
+            ripples = new RippleField(config.MaxConcurrentRipples, config.RippleDurationSeconds, config.RippleStrength, config.RippleRadius, config.RippleDangerRadius);
+        }
+
+        private void HandlePointerPressed(Vector2 worldPosition) {
+            if (config == null || !config.PointerInteractionEnabled || !config.RippleOnClickEnabled) {
+                return;
+            }
+
+            ripples.Emit(worldPosition);
         }
 
         private void RebuildPositionSnapshot() {

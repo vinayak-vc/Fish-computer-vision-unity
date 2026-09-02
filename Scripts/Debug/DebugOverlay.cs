@@ -3,6 +3,8 @@ using System.Text;
 using UnityEngine;
 
 using ViitorCloud.FishAquarium.Core;
+using ViitorCloud.FishAquarium.Fish;
+using ViitorCloud.FishAquarium.Input;
 
 namespace ViitorCloud.FishAquarium.Debugging {
     /// <summary>
@@ -113,8 +115,8 @@ namespace ViitorCloud.FishAquarium.Debugging {
             EnsureStyles();
             RefreshText();
 
-            GUI.Box(new Rect(12f, 12f, 430f, 168f), GUIContent.none, panelStyle);
-            GUI.Label(new Rect(24f, 22f, 410f, 150f), cachedText, labelStyle);
+            GUI.Box(new Rect(12f, 12f, 620f, 232f), GUIContent.none, panelStyle);
+            GUI.Label(new Rect(24f, 22f, 600f, 214f), cachedText, labelStyle);
         }
 
         private void RefreshText() {
@@ -136,14 +138,56 @@ namespace ViitorCloud.FishAquarium.Debugging {
                 textBuilder.Append("Last fish: ").Append(string.IsNullOrEmpty(ingestService.LastLoadedFileName) ? "none" : ingestService.LastLoadedFileName).Append('\n');
                 textBuilder.Append("File watcher: ").Append(ingestService.IsWatcherActive ? "ACTIVE" : "INACTIVE");
                 textBuilder.Append("   pending: ").Append(ingestService.PendingFileCount);
-                textBuilder.Append("   loaded: ").Append(ingestService.ProcessedFileCount).Append('\n');
+                textBuilder.Append("   loaded: ").Append(ingestService.ProcessedFileCount);
+                textBuilder.Append("   dupes: ").Append(ingestService.DuplicateCount).Append('\n');
             } else {
                 textBuilder.Append("Ingest service: NOT ASSIGNED\n");
             }
 
+            AppendPointerLine();
+            AppendNewestFishTraits();
+
             textBuilder.Append("F1 overlay   F2 test fish   F3 clear   F4 rescan   ESC quit");
 
             cachedText = textBuilder.ToString();
+        }
+
+        /// <summary>
+        /// Where the visitor is, as the fish see it. Worth showing because a pointer reporting unavailable
+        /// looks exactly like fish that are simply not reacting, and the two have different fixes.
+        /// </summary>
+        private void AppendPointerLine() {
+            if (aquariumManager == null) {
+                return;
+            }
+
+            IPointerSource pointer = aquariumManager.Pointer;
+
+            if (pointer == null) {
+                textBuilder.Append("Pointer: NOT ASSIGNED\n");
+                return;
+            }
+
+            textBuilder.Append("Pointer: ").Append(pointer.IsAvailable ? "ok" : "away");
+            textBuilder.Append("   speed: ").Append(pointer.Speed.ToString("F1"));
+            textBuilder.Append("   ripples: ").Append(aquariumManager.Ripples != null ? aquariumManager.Ripples.ActiveCount : 0).Append('\n');
+        }
+
+        /// <summary>
+        /// Personality of the most recently spawned fish. The fastest way to tell whether a drawing arrived
+        /// with traits from Python or fell back to its identity hash, which is otherwise invisible.
+        /// </summary>
+        private void AppendNewestFishTraits() {
+            if (aquariumManager == null || aquariumManager.ActiveFish.Count == 0) {
+                return;
+            }
+
+            FishController newest = aquariumManager.ActiveFish[aquariumManager.ActiveFish.Count - 1];
+            if (newest == null || newest.Data == null || newest.Data.Traits == null) {
+                return;
+            }
+
+            textBuilder.Append("Newest: ").Append(newest.Data.Traits.ToString()).Append('\n');
         }
 
         private void EnsureStyles() {

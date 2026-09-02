@@ -7,10 +7,16 @@ using ViitorCloud.FishAquarium.Core;
 
 namespace ViitorCloud.FishAquarium.Fish {
     /// <summary>
-    /// Turns a loaded Sprite into a living fish: normalises its size, rolls its behaviour profile,
-    /// chooses an entry point and hands the finished instance to AquariumManager.
+    /// Turns a loaded Sprite into a living fish: sizes it from what Python measured, applies its
+    /// personality, chooses an entry point and hands the finished instance to AquariumManager.
+    ///
+    /// Both ingest sources come through here, so population limits, texture lifetime and behaviour have
+    /// exactly one implementation whether a drawing arrived over the socket or as a file.
     /// </summary>
     public sealed class FishFactory : MonoBehaviour {
+        /// <summary> Passed as foreground_area when the caller has no measurement, so size falls back to the identity roll. </summary>
+        public const int UnknownForegroundArea = 0;
+
         [SerializeField] private AquariumConfig config;
         [SerializeField] private AquariumManager aquariumManager;
         [SerializeField] private AquariumBounds bounds;
@@ -39,8 +45,19 @@ namespace ViitorCloud.FishAquarium.Fish {
         /// <summary>
         /// As above, but a silent fish skips the entrance animation and is placed anywhere in the aquarium
         /// rather than swimming in from an edge. Used for replayed captures.
+        ///
+        /// No personality is supplied, so it is derived from the source path. That is the documented
+        /// fallback of contract section 9, and it is what every folder-watched fish uses.
         /// </summary>
         public FishController CreateFish(Sprite sprite, string sourceFilePath, bool spawnSilently) {
+            return CreateFish(sprite, sourceFilePath, FishTraitFallback.FromIdentity(sourceFilePath), UnknownForegroundArea, spawnSilently);
+        }
+
+        /// <summary>
+        /// The full entry point, used by the socket ingest, where Python has already sent a personality and
+        /// a mask area. traits must never be null: a fish without a personality has no behaviour at all.
+        /// </summary>
+        public FishController CreateFish(Sprite sprite, string sourceKey, FishTraits traits, int foregroundArea, bool spawnSilently) {
             if (sprite == null) {
                 Debug.LogError("FishFactory: CreateFish called with a null sprite.");
                 return null;
@@ -51,18 +68,23 @@ namespace ViitorCloud.FishAquarium.Fish {
                 return null;
             }
 
+            if (traits == null) {
+                Debug.LogWarning("FishFactory: no traits supplied for " + sourceKey + "; deriving them from its identity.");
+                traits = FishTraitFallback.FromIdentity(sourceKey);
+            }
+
             if (!aquariumManager.TryMakeRoomForNewFish()) {
                 return null;
             }
 
-            string fileName = string.IsNullOrEmpty(sourceFilePath) ? sprite.name : Path.GetFileName(sourceFilePath);
+            string fileName = string.IsNullOrEmpty(sourceKey) ? sprite.name : Path.GetFileName(sourceKey);
 
-            FishData data = new FishData(aquariumManager.ReserveFishId(), fileName, sourceFilePath, sprite);
-            data.ApplyRandomisedProfile(config);
-            data.SetWorldScale(CalculateWorldScale(sprite));
+            FishData data = new FishData(aquariumManager.ReserveFishId(), fileName, sourceKey, sprite, traits);
+            data.ApplyTraitProfile(config);
+            data.SetWorldScale(CalculateWorldScale(sprite, data, foregroundArea));
 
             Vector2 initialHeading;
-            data.SetSpawnPosition(ChooseSpawnPosition(out initialHeading, spawnSilently));
+            data.SetSpawnPosition(ChooseSpawnPosition(data, out initialHeading, spawnSilently));
 
             FishController fish = InstantiateFish();
             if (fish == null) {
@@ -78,20 +100,49 @@ namespace ViitorCloud.FishAquarium.Fish {
             return fish;
         }
 
-        /// <summary> Uniform scale that brings any source resolution to the configured world size without distorting it. </summary>
-        private float CalculateWorldScale(Sprite sprite) {
+        /// <summary>
+        /// Uniform scale that brings any source resolution to a world size without distorting it.
+        /// The size comes from the mask area Python measured, not from the texture dimensions: the capture
+        /// station crops and pads to its own rules, so two very differently sized drawings can arrive as
+        /// the same-sized PNG, and sizing off the PNG would make every fish the same size.
+        /// </summary>
+        private float CalculateWorldScale(Sprite sprite, FishData data, int foregroundArea) {
+            float normalised = -1f;
+
+            if (config.SizeFromForegroundArea) {
+                normalised = FishSizeNormalizer.NormaliseForegroundArea(foregroundArea, config.ForegroundAreaAtMinimumSize, config.ForegroundAreaAtMaximumSize);
+            }
+
+            if (normalised < 0f) {
+                normalised = data.SizeRoll;
+            } else {
+                normalised = AquariumConfig.EvaluateResponse(config.ForegroundAreaResponse, normalised);
+            }
+
             int pixelWidth = Mathf.RoundToInt(sprite.rect.width);
             int pixelHeight = Mathf.RoundToInt(sprite.rect.height);
-            float targetLongestSide = config.FishWorldSizeRange.PickRandom();
+            float targetLongestSide = config.FishWorldSizeRange.Evaluate(normalised);
 
             return FishSizeNormalizer.CalculateUniformScale(pixelWidth, pixelHeight, sprite.pixelsPerUnit, targetLongestSide);
         }
 
-        private Vector2 ChooseSpawnPosition(out Vector2 initialHeading, bool forceInsideBounds) {
+        /// <summary>
+        /// Where the fish appears. Deliberately the one place UnityEngine.Random is still allowed: which
+        /// edge a fish swims in from is not part of its identity, nobody could recognise a drawing by it,
+        /// and M5 will persist real positions anyway. Every value that IS identity comes from FishData.
+        /// </summary>
+        private Vector2 ChooseSpawnPosition(FishData data, out Vector2 initialHeading, bool forceInsideBounds) {
             if (!forceInsideBounds && config.SpawnStrategy == FishSpawnStrategy.EdgeEntry) {
                 Vector2 inward;
                 Vector2 entryPoint = bounds.RandomEdgeEntryPoint(config.BoundsPadding, out inward);
                 initialHeading = (inward + new Vector2(0f, UnityEngine.Random.Range(-0.25f, 0.25f))).normalized;
+
+                // Entry is always on a side edge, so the height is free: bring the fish in at the depth it
+                // prefers rather than making it swim across the whole tank to get there.
+                if (config.PreferredDepthEnabled) {
+                    entryPoint.y = ResolvePreferredDepthHeight(data);
+                }
+
                 return entryPoint;
             }
 
@@ -100,7 +151,18 @@ namespace ViitorCloud.FishAquarium.Fish {
                 initialHeading = Vector2.right;
             }
 
-            return bounds.RandomPointInside(config.BoundsPadding);
+            Vector2 position = bounds.RandomPointInside(config.BoundsPadding);
+
+            if (config.PreferredDepthEnabled) {
+                position.y = ResolvePreferredDepthHeight(data);
+            }
+
+            return position;
+        }
+
+        private float ResolvePreferredDepthHeight(FishData data) {
+            Rect area = bounds.GetPaddedArea(config.BoundsPadding);
+            return FishDepthProfile.EvaluatePreferredHeight(data.PreferredDepth, area);
         }
 
         private FishController InstantiateFish() {

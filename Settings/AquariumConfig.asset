@@ -41,6 +41,33 @@ MonoBehaviour:
     min: 1.7
     max: 2.7
   spritePixelsPerUnit: 100
+  sizeFromForegroundArea: 1
+  foregroundAreaAtMinimumSize: 40000
+  foregroundAreaAtMaximumSize: 420000
+  foregroundAreaResponse:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 1
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 1
+      value: 1
+      inSlope: 1
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
   speedRange:
     min: 0.5
     max: 1.5
@@ -64,6 +91,156 @@ MonoBehaviour:
   boundsAvoidanceMargin: 1.1
   boundsAvoidanceStrength: 2.4
   boundsPadding: 0.35
+  speedResponse:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 1
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 1
+      value: 1
+      inSlope: 1
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  accelerationResponse:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 1
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 1
+      value: 1
+      inSlope: 1
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  graceTurnResponse:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: -1
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: -1
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  graceDampingRange:
+    min: 1.6
+    max: 0.5
+  graceTailAmplitudeResponse:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 1
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 1
+      value: 1
+      inSlope: 1
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  speedTailFrequencyResponse:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 1
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 1
+      value: 1
+      inSlope: 1
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  speedIdleResponse:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: -1
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: -1
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  preferredDepthEnabled: 1
+  preferredDepthBandHeight: 0.45
+  preferredDepthHomingStrength: 1.3
   separationEnabled: 1
   separationRadius: 1
   separationStrength: 0.9
@@ -87,5 +264,39 @@ MonoBehaviour:
   depthSpeedInfluence: 0.3
   foregroundSortingOrder: 200
   backgroundSortingOrder: 20
+  pointerInteractionEnabled: 1
+  pointerInfluenceRadius: 4.5
+  pointerAttractionStrength: 1.7
+  pointerRepulsionStrength: 3.4
+  pointerPersonalSpace: 0.9
+  startleSpeedThreshold: 3.5
+  startleFearlessMultiplier: 3.5
+  startleDurationSeconds: 1.5
+  startleStrength: 4.5
+  startleSpeedMultiplier: 2.1
+  rippleOnClickEnabled: 1
+  rippleStrength: 8
+  rippleDurationSeconds: 2.2
+  rippleRadius: 7
+  rippleDangerRadius: 2.4
+  maxConcurrentRipples: 8
+  affectionEnabled: 1
+  affectionProximityRadius: 2.6
+  affectionPointerSpeedLimit: 1.2
+  affectionGainPerSecond: 0.22
+  affectionDecayPerSecond: 0.02
+  affectionTrustThreshold: 0.55
+  socketSourceEnabled: 1
+  socketAutoConnect: 1
+  socketHost: 192.168.1.28
+  socketPort: 8765
+  socketNamespace: /
+  socketEventName: fish_captured
+  socketTransport: 0
+  socketReconnectionAttempts: 0
+  socketReconnectionDelaySeconds: 1
+  socketReconnectionDelayMaxSeconds: 10
+  socketConnectTimeoutSeconds: 20
+  expectedSchemaVersion: 2
   debugOverlayVisibleOnStart: 1
   drawAquariumBoundsGizmo: 1

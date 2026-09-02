@@ -51,6 +51,14 @@ namespace ViitorCloud.FishAquarium.Core {
         [Tooltip("World-unit length of the longest side of the fish. Aspect ratio of the source PNG is always preserved.")]
         [SerializeField] private FloatRange fishWorldSizeRange = new FloatRange(1.7f, 2.7f);
         [SerializeField] private float spritePixelsPerUnit = 100f;
+        [Tooltip("Size the fish from foreground_area, so a small drawing stays a small fish. Off falls back to the deterministic identity roll.")]
+        [SerializeField] private bool sizeFromForegroundArea = true;
+        [Tooltip("Mask area in source pixels that maps to the smallest fish in the range above.")]
+        [SerializeField] private int foregroundAreaAtMinimumSize = 40000;
+        [Tooltip("Mask area in source pixels that maps to the largest fish in the range above. Anything larger is clamped.")]
+        [SerializeField] private int foregroundAreaAtMaximumSize = 420000;
+        [Tooltip("Shapes the mapping between those two areas. Input and output are both 0..1.")]
+        [SerializeField] private AnimationCurve foregroundAreaResponse = AnimationCurve.Linear(0f, 0f, 1f, 1f);
 
         [Header("Fish Movement")]
         [SerializeField] private FloatRange speedRange = new FloatRange(0.5f, 1.5f);
@@ -71,6 +79,30 @@ namespace ViitorCloud.FishAquarium.Core {
         [SerializeField] private float boundsAvoidanceMargin = 1.1f;
         [SerializeField] private float boundsAvoidanceStrength = 2.4f;
         [SerializeField] private float boundsPadding = 0.35f;
+
+        [Header("Trait Response")]
+        [Tooltip("Python sends traits, never behaviour. These curves are where a 0..1 trait becomes motion, and they are the intended place to tune how a personality reads on screen. Input is the trait, output is a 0..1 position within the matching range above.")]
+        [SerializeField] private AnimationCurve speedResponse = AnimationCurve.Linear(0f, 0f, 1f, 1f);
+        [SerializeField] private AnimationCurve accelerationResponse = AnimationCurve.Linear(0f, 0f, 1f, 1f);
+        [Tooltip("Grace to turn rate. A graceful fish banks in wide arcs, so this curve normally falls: high grace means a LOW turn-rate limit.")]
+        [SerializeField] private AnimationCurve graceTurnResponse = AnimationCurve.Linear(0f, 1f, 1f, 0f);
+        [Tooltip("Grace to steering damping, multiplying the pitch smoothing below. A graceful fish changes attitude slowly.")]
+        [SerializeField] private FloatRange graceDampingRange = new FloatRange(1.6f, 0.5f);
+        [Tooltip("Tail-beat amplitude. Driven by grace: a graceful fish sweeps further.")]
+        [SerializeField] private AnimationCurve graceTailAmplitudeResponse = AnimationCurve.Linear(0f, 0f, 1f, 1f);
+        [Tooltip("Tail-beat frequency. Driven by speed: a darting fish beats faster.")]
+        [SerializeField] private AnimationCurve speedTailFrequencyResponse = AnimationCurve.Linear(0f, 0f, 1f, 1f);
+        [Tooltip("Idle probability across the trait speed range. A sluggish fish pauses more, so this normally falls.")]
+        [SerializeField] private AnimationCurve speedIdleResponse = AnimationCurve.Linear(0f, 1f, 1f, 0f);
+
+        [Header("Preferred Depth")]
+        [Tooltip("Vertical home band from personality.preferred_depth: 0 is the surface, 1 is the floor. This is NOT parallax depth, which is the Depth block below.")]
+        [SerializeField] private bool preferredDepthEnabled = true;
+        [Tooltip("Height of the band a fish keeps to, as a fraction of the aquarium height. Larger values let fish roam more vertically.")]
+        [Range(0.05f, 1f)]
+        [SerializeField] private float preferredDepthBandHeight = 0.45f;
+        [Tooltip("How hard a fish is pulled back towards its band once outside it. 0 disables the band without disabling the trait.")]
+        [SerializeField] private float preferredDepthHomingStrength = 1.3f;
 
         [Header("Fish Separation")]
         [SerializeField] private bool separationEnabled = true;
@@ -102,6 +134,54 @@ namespace ViitorCloud.FishAquarium.Core {
         [SerializeField] private int foregroundSortingOrder = 200;
         [SerializeField] private int backgroundSortingOrder = 20;
 
+        [Header("Pointer Interaction")]
+        [Tooltip("The visitor reaches the fish only through the pointer: there is no person or hand tracking in this build. Turning this off leaves the tank running as an unattended screensaver.")]
+        [SerializeField] private bool pointerInteractionEnabled = true;
+        [Tooltip("World-unit radius within which a fish notices the pointer at all.")]
+        [SerializeField] private float pointerInfluenceRadius = 4.5f;
+        [Tooltip("Pull towards the pointer at curiosity 1. Scaled by curiosity, and by how close the pointer is.")]
+        [SerializeField] private float pointerAttractionStrength = 1.7f;
+        [Tooltip("Push away from the pointer at fear 1. Deliberately stronger than attraction, so a scared fish wins over a curious one.")]
+        [SerializeField] private float pointerRepulsionStrength = 3.4f;
+        [Tooltip("Fish closer than this to the pointer always back off, whatever their curiosity. Stops a curious fish sitting under the cursor.")]
+        [SerializeField] private float pointerPersonalSpace = 0.9f;
+
+        [Header("Pointer Startle")]
+        [Tooltip("Pointer speed in world units per second that startles a maximally fearful fish. A calm fish needs the multiplier below on top.")]
+        [SerializeField] private float startleSpeedThreshold = 3.5f;
+        [Tooltip("How much harder it is to startle a fearless fish. 3 means a fear-0 fish needs three times the pointer speed a fear-1 fish does.")]
+        [SerializeField] private float startleFearlessMultiplier = 3.5f;
+        [SerializeField] private float startleDurationSeconds = 1.5f;
+        [Tooltip("Extra flee force while startled, on top of the ordinary fear repulsion.")]
+        [SerializeField] private float startleStrength = 4.5f;
+        [Tooltip("Speed multiplier applied while a fish is startled, so a bolt actually looks like a bolt.")]
+        [SerializeField] private float startleSpeedMultiplier = 2.1f;
+
+        [Header("Pointer Ripples")]
+        [Tooltip("A click sends out a radial force field, strength over distance, decaying over its lifetime.")]
+        [SerializeField] private bool rippleOnClickEnabled = true;
+        [SerializeField] private float rippleStrength = 8f;
+        [SerializeField] private float rippleDurationSeconds = 2.2f;
+        [Tooltip("World-unit reach of one ripple. Beyond this it is ignored, which is what keeps the cost bounded.")]
+        [SerializeField] private float rippleRadius = 7f;
+        [Tooltip("Radius of the temporary danger zone a click leaves behind, which fish route around until the ripple dies.")]
+        [SerializeField] private float rippleDangerRadius = 2.4f;
+        [Tooltip("Ripples alive at once. Older ones are dropped when a visitor clicks faster than they decay.")]
+        [SerializeField] private int maxConcurrentRipples = 8;
+
+        [Header("Pointer Affection")]
+        [Tooltip("A pointer that lingers slowly near a fish earns its trust, and a trusting fish approaches instead of fleeing.")]
+        [SerializeField] private bool affectionEnabled = true;
+        [SerializeField] private float affectionProximityRadius = 2.6f;
+        [Tooltip("Pointer speed below which proximity counts as calm company rather than a threat.")]
+        [SerializeField] private float affectionPointerSpeedLimit = 1.2f;
+        [SerializeField] private float affectionGainPerSecond = 0.22f;
+        [Tooltip("How fast trust fades when the pointer is away. Slow on purpose: affection is meant to persist across a visit, and across restarts once M5 lands.")]
+        [SerializeField] private float affectionDecayPerSecond = 0.02f;
+        [Tooltip("Affection above which fear inverts into approach. Below it, affection only softens the flee response.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float affectionTrustThreshold = 0.55f;
+
         [Header("Socket.IO Source")]
         [Tooltip("Receive fish from the Python capture station over Socket.IO. Independent of the folder watcher; both can run at once.")]
         [SerializeField] private bool socketSourceEnabled = true;
@@ -117,8 +197,8 @@ namespace ViitorCloud.FishAquarium.Core {
         [SerializeField] private float socketReconnectionDelaySeconds = 1f;
         [SerializeField] private float socketReconnectionDelayMaxSeconds = 10f;
         [SerializeField] private float socketConnectTimeoutSeconds = 20f;
-        [Tooltip("Schema the payload contract was written against. A different value on the wire is logged once as a warning.")]
-        [SerializeField] private int expectedSchemaVersion = 1;
+        [Tooltip("Schema the payload contract was written against. A higher value on the wire is logged once, loudly; a lower one is the documented legacy replay case and is only noted.")]
+        [SerializeField] private int expectedSchemaVersion = 2;
 
         [Header("Debug")]
         [SerializeField] private bool debugOverlayVisibleOnStart = true;
@@ -231,6 +311,150 @@ namespace ViitorCloud.FishAquarium.Core {
 
         public float SpritePixelsPerUnit {
             get { return spritePixelsPerUnit; }
+        }
+
+        public bool SizeFromForegroundArea {
+            get { return sizeFromForegroundArea; }
+        }
+
+        public int ForegroundAreaAtMinimumSize {
+            get { return foregroundAreaAtMinimumSize; }
+        }
+
+        public int ForegroundAreaAtMaximumSize {
+            get { return foregroundAreaAtMaximumSize; }
+        }
+
+        public AnimationCurve ForegroundAreaResponse {
+            get { return foregroundAreaResponse; }
+        }
+
+        public AnimationCurve SpeedResponse {
+            get { return speedResponse; }
+        }
+
+        public AnimationCurve AccelerationResponse {
+            get { return accelerationResponse; }
+        }
+
+        public AnimationCurve GraceTurnResponse {
+            get { return graceTurnResponse; }
+        }
+
+        public FloatRange GraceDampingRange {
+            get { return graceDampingRange; }
+        }
+
+        public AnimationCurve GraceTailAmplitudeResponse {
+            get { return graceTailAmplitudeResponse; }
+        }
+
+        public AnimationCurve SpeedTailFrequencyResponse {
+            get { return speedTailFrequencyResponse; }
+        }
+
+        public AnimationCurve SpeedIdleResponse {
+            get { return speedIdleResponse; }
+        }
+
+        public bool PreferredDepthEnabled {
+            get { return preferredDepthEnabled; }
+        }
+
+        public float PreferredDepthBandHeight {
+            get { return preferredDepthBandHeight; }
+        }
+
+        public float PreferredDepthHomingStrength {
+            get { return preferredDepthHomingStrength; }
+        }
+
+        public bool PointerInteractionEnabled {
+            get { return pointerInteractionEnabled; }
+        }
+
+        public float PointerInfluenceRadius {
+            get { return pointerInfluenceRadius; }
+        }
+
+        public float PointerAttractionStrength {
+            get { return pointerAttractionStrength; }
+        }
+
+        public float PointerRepulsionStrength {
+            get { return pointerRepulsionStrength; }
+        }
+
+        public float PointerPersonalSpace {
+            get { return pointerPersonalSpace; }
+        }
+
+        public float StartleSpeedThreshold {
+            get { return startleSpeedThreshold; }
+        }
+
+        public float StartleFearlessMultiplier {
+            get { return startleFearlessMultiplier; }
+        }
+
+        public float StartleDurationSeconds {
+            get { return startleDurationSeconds; }
+        }
+
+        public float StartleStrength {
+            get { return startleStrength; }
+        }
+
+        public float StartleSpeedMultiplier {
+            get { return startleSpeedMultiplier; }
+        }
+
+        public bool RippleOnClickEnabled {
+            get { return rippleOnClickEnabled; }
+        }
+
+        public float RippleStrength {
+            get { return rippleStrength; }
+        }
+
+        public float RippleDurationSeconds {
+            get { return rippleDurationSeconds; }
+        }
+
+        public float RippleRadius {
+            get { return rippleRadius; }
+        }
+
+        public float RippleDangerRadius {
+            get { return rippleDangerRadius; }
+        }
+
+        public int MaxConcurrentRipples {
+            get { return maxConcurrentRipples; }
+        }
+
+        public bool AffectionEnabled {
+            get { return affectionEnabled; }
+        }
+
+        public float AffectionProximityRadius {
+            get { return affectionProximityRadius; }
+        }
+
+        public float AffectionPointerSpeedLimit {
+            get { return affectionPointerSpeedLimit; }
+        }
+
+        public float AffectionGainPerSecond {
+            get { return affectionGainPerSecond; }
+        }
+
+        public float AffectionDecayPerSecond {
+            get { return affectionDecayPerSecond; }
+        }
+
+        public float AffectionTrustThreshold {
+            get { return affectionTrustThreshold; }
         }
 
         public FloatRange SpeedRange {
@@ -448,6 +672,29 @@ namespace ViitorCloud.FishAquarium.Core {
             runtimeMode = overrideRuntimeMode;
         }
 
+        /// <summary>
+        /// Maps a 0..1 trait through a response curve to a 0..1 position within a range. Null and empty
+        /// curves fall through to the raw trait rather than to zero, because OnValidate does not run in a
+        /// player and an aquarium that stopped moving in production would be a poor way to learn that.
+        /// </summary>
+        public static float EvaluateResponse(AnimationCurve curve, float trait) {
+            float clampedTrait = Mathf.Clamp01(trait);
+
+            if (curve == null || curve.length == 0) {
+                return clampedTrait;
+            }
+
+            return Mathf.Clamp01(curve.Evaluate(clampedTrait));
+        }
+
+        private static AnimationCurve RepairCurve(AnimationCurve curve, float startValue, float endValue) {
+            if (curve != null && curve.length > 0) {
+                return curve;
+            }
+
+            return AnimationCurve.Linear(0f, startValue, 1f, endValue);
+        }
+
         private static string NormalizePath(string path) {
             if (string.IsNullOrWhiteSpace(path)) {
                 return string.Empty;
@@ -494,6 +741,42 @@ namespace ViitorCloud.FishAquarium.Core {
             if (string.IsNullOrWhiteSpace(fileSearchPattern)) {
                 fileSearchPattern = "*.png";
             }
+
+            foregroundAreaAtMinimumSize = Mathf.Max(1, foregroundAreaAtMinimumSize);
+            foregroundAreaAtMaximumSize = Mathf.Max(foregroundAreaAtMinimumSize + 1, foregroundAreaAtMaximumSize);
+            preferredDepthBandHeight = Mathf.Clamp(preferredDepthBandHeight, 0.05f, 1f);
+            preferredDepthHomingStrength = Mathf.Max(0f, preferredDepthHomingStrength);
+
+            pointerInfluenceRadius = Mathf.Max(0.01f, pointerInfluenceRadius);
+            pointerAttractionStrength = Mathf.Max(0f, pointerAttractionStrength);
+            pointerRepulsionStrength = Mathf.Max(0f, pointerRepulsionStrength);
+            pointerPersonalSpace = Mathf.Clamp(pointerPersonalSpace, 0f, pointerInfluenceRadius);
+            startleSpeedThreshold = Mathf.Max(0.01f, startleSpeedThreshold);
+            startleFearlessMultiplier = Mathf.Max(1f, startleFearlessMultiplier);
+            startleDurationSeconds = Mathf.Max(0f, startleDurationSeconds);
+            startleStrength = Mathf.Max(0f, startleStrength);
+            startleSpeedMultiplier = Mathf.Max(1f, startleSpeedMultiplier);
+            rippleStrength = Mathf.Max(0f, rippleStrength);
+            rippleDurationSeconds = Mathf.Max(0.01f, rippleDurationSeconds);
+            rippleRadius = Mathf.Max(0.01f, rippleRadius);
+            rippleDangerRadius = Mathf.Clamp(rippleDangerRadius, 0f, rippleRadius);
+            maxConcurrentRipples = Mathf.Max(1, maxConcurrentRipples);
+            affectionProximityRadius = Mathf.Max(0.01f, affectionProximityRadius);
+            affectionPointerSpeedLimit = Mathf.Max(0.01f, affectionPointerSpeedLimit);
+            affectionGainPerSecond = Mathf.Max(0f, affectionGainPerSecond);
+            affectionDecayPerSecond = Mathf.Max(0f, affectionDecayPerSecond);
+            affectionTrustThreshold = Mathf.Clamp01(affectionTrustThreshold);
+
+            // A curve added to this asset after it was last serialised deserialises with no keyframes, and
+            // an empty AnimationCurve evaluates to zero everywhere - which would silently freeze every fish
+            // that reads it. Repairing here means the default is what an artist sees, not a dead aquarium.
+            foregroundAreaResponse = RepairCurve(foregroundAreaResponse, 0f, 1f);
+            speedResponse = RepairCurve(speedResponse, 0f, 1f);
+            accelerationResponse = RepairCurve(accelerationResponse, 0f, 1f);
+            graceTurnResponse = RepairCurve(graceTurnResponse, 1f, 0f);
+            graceTailAmplitudeResponse = RepairCurve(graceTailAmplitudeResponse, 0f, 1f);
+            speedTailFrequencyResponse = RepairCurve(speedTailFrequencyResponse, 0f, 1f);
+            speedIdleResponse = RepairCurve(speedIdleResponse, 1f, 0f);
 
             fishWorldSizeRange = fishWorldSizeRange.Normalized();
             speedRange = speedRange.Normalized();

@@ -27,6 +27,9 @@ namespace ViitorCloud.FishAquarium.Input {
         /// <summary> Written by the main thread only; int reads are atomic so PendingCount stays cheap and lock-free. </summary>
         private int pendingCountCache;
 
+        /// <summary> Guarded by syncRoot, since the FileSystemWatcher thread is what increments it. </summary>
+        private int duplicateCount;
+
         /// <summary> Files detected but not yet handed to the loader, including ones still settling. </summary>
         public int PendingCount {
             get {
@@ -41,6 +44,18 @@ namespace ViitorCloud.FishAquarium.Input {
             get { return processedPaths.Count; }
         }
 
+        /// <summary>
+        /// Detections dropped because that path had already been seen. A periodic rescan re-reports every
+        /// file it finds, so this climbs steadily on a healthy installation and is not a fault.
+        /// </summary>
+        public int DuplicateCount {
+            get {
+                lock (syncRoot) {
+                    return duplicateCount;
+                }
+            }
+        }
+
         /// <summary> Safe to call from the FileSystemWatcher thread. Silently ignores paths already seen this session. </summary>
         public void Enqueue(string absolutePath) {
             if (string.IsNullOrWhiteSpace(absolutePath)) {
@@ -51,6 +66,7 @@ namespace ViitorCloud.FishAquarium.Input {
 
             lock (syncRoot) {
                 if (!knownPaths.Add(normalised)) {
+                    duplicateCount++;
                     return;
                 }
 

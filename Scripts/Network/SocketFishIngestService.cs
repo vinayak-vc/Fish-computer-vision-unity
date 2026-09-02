@@ -58,6 +58,14 @@ namespace ViitorCloud.FishAquarium.Network {
             get { return rejectedCount; }
         }
 
+        /// <summary>
+        /// Captures dropped as duplicates. Expected to step up by the replay window on every reconnect;
+        /// see FishPayloadDecodeQueue.DuplicateTotal for what a steadily climbing value would mean.
+        /// </summary>
+        public int DuplicateCount {
+            get { return decodeQueue.DuplicateTotal; }
+        }
+
         private void Start() {
             if (config == null || fishFactory == null || aquariumManager == null) {
                 Debug.LogError("SocketFishIngestService: dependencies are missing, no fish will arrive over the socket.");
@@ -142,8 +150,13 @@ namespace ViitorCloud.FishAquarium.Network {
             Connect();
         }
 
-        /// <summary> Nothing to forget: the capture station gives every event a unique id, so there is no dedupe cache. </summary>
+        /// <summary>
+        /// Forgets every capture id this session has seen, so the next replay burst is admitted in full
+        /// instead of being deduplicated away. Development aid: it is the only way to see the same drawing
+        /// twice without restarting the capture station.
+        /// </summary>
         public void ResetProcessedFileCache() {
+            decodeQueue.ForgetKnownCaptures();
             spawnedCount = 0;
             rejectedCount = 0;
             lastLoadedFileName = string.Empty;
@@ -256,14 +269,30 @@ namespace ViitorCloud.FishAquarium.Network {
             return true;
         }
 
-        /// <summary> Checked once a payload reaches the main thread, since the parse now happens on a worker. </summary>
+        /// <summary>
+        /// Checked once a payload reaches the main thread, since the parse now happens on a worker.
+        ///
+        /// The two directions are not the same event. A HIGHER version than this client knows means the
+        /// capture station has made a breaking change and fields this build depends on may have moved -
+        /// contract section 3 rule 4 asks Unity to say so loudly and keep working. A LOWER version is the
+        /// documented legacy replay of section 9, happens on any installation with history on disk, and is
+        /// handled correctly by the trait fallback, so raising a warning for it would only teach an
+        /// operator to ignore warnings.
+        /// </summary>
         private void WarnOnUnexpectedSchema(int schemaVersion) {
             if (schemaWarningLogged || config == null || schemaVersion == config.ExpectedSchemaVersion) {
                 return;
             }
 
             schemaWarningLogged = true;
-            Debug.LogWarning("SocketFishIngestService: payload schema_version is " + schemaVersion + " but this client was written against " + config.ExpectedSchemaVersion + ". Fields may have changed; further occurrences are not logged.");
+
+            if (schemaVersion > config.ExpectedSchemaVersion) {
+                Debug.LogWarning("SocketFishIngestService: payload schema_version is " + schemaVersion + " but this client was written against " + config.ExpectedSchemaVersion +
+                                 ". The capture station is ahead of this build; fields may have changed. Fish will keep arriving, but check docs/interaction_contract.md. Further occurrences are not logged.");
+                return;
+            }
+
+            Debug.Log("SocketFishIngestService: replaying legacy schema_version " + schemaVersion + " captures; personalities for these are derived from their capture id. Further occurrences are not logged.");
         }
 
         private void LogDecodeFailures() {
@@ -299,7 +328,7 @@ namespace ViitorCloud.FishAquarium.Network {
                 return;
             }
 
-            FishController fish = fishFactory.CreateFish(sprite, decoded.Id, decoded.IsReplay);
+            FishController fish = fishFactory.CreateFish(sprite, decoded.Id, decoded.Traits, decoded.ForegroundArea, decoded.IsReplay);
             if (fish == null) {
                 // The aquarium turned it away, so give the texture straight back rather than leaking it.
                 FishSpriteCache.Release(decoded.Id);

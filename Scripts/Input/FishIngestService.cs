@@ -55,6 +55,11 @@ namespace ViitorCloud.FishAquarium.Input {
             get { return loadQueue.ProcessedCount; }
         }
 
+        /// <summary> Re-detections of a file already ingested, mostly from the safety-net periodic rescan. </summary>
+        public int DuplicateCount {
+            get { return loadQueue.DuplicateCount; }
+        }
+
         private void Start() {
             if (config == null || fishFactory == null || aquariumManager == null) {
                 Debug.LogError("FishIngestService: dependencies are missing, no fish will be loaded.");

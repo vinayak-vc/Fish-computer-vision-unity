@@ -29,6 +29,32 @@ namespace ViitorCloud.FishAquarium.Fish {
             return targetLongestSide / longestSide;
         }
 
+        /// <summary>
+        /// Where a drawing sits between the smallest and largest on-screen fish, from the mask area Python
+        /// measured. Returns 0..1, for the caller to map through a response curve and onto a size range.
+        ///
+        /// Mask area rather than texture dimensions on purpose: the capture station pads and crops to its
+        /// own rules, so two drawings of very different sizes can arrive as the same-sized PNG. Sizing from
+        /// foreground_area is what keeps a fish drawn small on the paper small in the tank.
+        ///
+        /// Returns -1 when the payload carried no usable area, which is the caller's signal to fall back to
+        /// the deterministic identity roll rather than to silently pick a middling size for everything.
+        /// </summary>
+        public static float NormaliseForegroundArea(int foregroundArea, int areaAtMinimumSize, int areaAtMaximumSize) {
+            if (foregroundArea <= 0) {
+                return -1f;
+            }
+
+            int lower = Mathf.Min(areaAtMinimumSize, areaAtMaximumSize);
+            int upper = Mathf.Max(areaAtMinimumSize, areaAtMaximumSize);
+
+            if (upper - lower <= 0) {
+                return -1f;
+            }
+
+            return Mathf.Clamp01((foregroundArea - lower) / (float)(upper - lower));
+        }
+
         /// <summary> Final world-space footprint of a fish once the normalising scale is applied. </summary>
         public static Vector2 CalculateNormalisedWorldSize(int pixelWidth, int pixelHeight, float pixelsPerUnit, float targetLongestSide) {
             float scale = CalculateUniformScale(pixelWidth, pixelHeight, pixelsPerUnit, targetLongestSide);

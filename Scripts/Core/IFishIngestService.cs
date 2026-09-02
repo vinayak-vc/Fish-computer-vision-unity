@@ -19,6 +19,13 @@ namespace ViitorCloud.FishAquarium.Core {
         /// <summary> Number of distinct source files ingested since startup. </summary>
         int ProcessedFileCount { get; }
 
+        /// <summary>
+        /// Arrivals discarded because that source had already been ingested this session. Expected to be
+        /// non-zero in normal operation - a socket reconnect replays recent captures, and a folder rescan
+        /// re-reports every file it finds - so it is a health reading, not an error count.
+        /// </summary>
+        int DuplicateCount { get; }
+
         /// <summary> Re-reads the input folder. Already-ingested files are skipped unless the cache was reset. </summary>
         void RescanInputFolder();
 
