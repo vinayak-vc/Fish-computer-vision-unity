@@ -55,21 +55,77 @@ sprites hidden — silhouettes only.
 **Done when** a first-time visitor works out cause and effect within about five seconds of moving
 the mouse, without being told.
 
-## M3 — Flocking and recognition — **not started** — *points 4, 16*
+## M3 — Flocking and recognition — **done** — *points 4, 16*
 
-Boids with cohesion and alignment weighted by `social`. Spatial hash for neighbour queries — not an
-O(n²) sweep, the tank is meant to hold hundreds. A newly spawned fish draws curious neighbours for
-a few seconds.
+- [x] `FishSpatialHash`, a uniform grid rebuilt each frame, replacing the O(n²) sweep
+- [x] Alignment and cohesion in `FishFlocking`, both weighted by `social` through response curves
+- [x] Separation kept as it was, and folded into the same single neighbour query
+- [x] `maxNeighboursConsidered` caps the per-fish cost when a shoal clumps
+- [x] A newly spawned fish draws curious neighbours for a few seconds; replays draw nobody
 
 **Done when** high-`social` fish form visible schools while low-`social` fish stay at the edges,
 with 200 agents holding 60 fps.
 
-## M4 — Feeding — **not started** — *point 2*
+Measured in play mode. Sixteen fish differing **only** in `social`, all at the same `preferred_depth`
+and with curiosity and fear at zero so nothing else could explain the result:
 
-Pointer gesture near the surface drops food; particles sink; fish steer toward them weighted by
-`curiosity` and compete weighted by `aggression`.
+| | `social` 0.98 | `social` 0.00 |
+|---|---|---|
+| spread about own centroid | 1.33 | 4.23 |
+| mean nearest cohort-mate | 0.88 | 1.43 |
+| heading agreement (1.0 = unison) | 0.86 | 0.29 |
+
+The social cohort holds together three times tighter and swims near-unison; the solitary cohort
+scatters across the tank and each fish goes its own way.
+
+Recognition, measured the same way: a fish with `curiosity` 1.0 placed three units from a newly
+arrived fish feels a force of 2.087 aimed exactly at it (dot 1.000), while a fish with `curiosity` 0.0
+at the identical point feels nothing at all.
+
+Performance: the flocking pass costs **0.671 ms per frame with 200 live fish**, 4.0% of a 60 fps
+budget. Details and the hash-versus-sweep scaling in [decisions.md](decisions.md) D-006.
+
+One caveat on the frame rate: the app caps itself at 60 fps with vSync, and the editor Game view
+paces its own repaints, so end-to-end fps in the editor could not be pushed past the cap to reveal
+total headroom. What is measured is the cost this milestone *adds*. **Confirm the full frame budget in
+a player build before an installation runs at 200.**
+
+Two things left as judgement calls rather than changes:
+
+- A fish only picks swim targets inside its own `preferred_depth` band, so two highly social fish
+  with very different preferred depths cannot school tightly. Cohesion pulls them together while
+  depth homing pulls back, and depth is the stronger by default. Schools form *within* a water layer.
+- `MaxFishCount` is still 30. The system handles 200 — that was measured by raising it temporarily and
+  putting it back — but how full the tank should be is an installation decision.
+
+## M4 — Feeding — **done** — *point 2*
+
+- [x] `FoodField`, pooled and fixed-capacity, ticked from `AquariumManager.Update`
+- [x] A press near the surface drops a pinch of food; a press lower down still sends a ripple
+- [x] Flakes sink, come to rest on the floor of the swimming area, and go stale
+- [x] Fish steer towards food weighted by `curiosity`, and food wakes an idle fish
+- [x] `aggression` decides who wins a flake, and how fast a fish takes its next mouthful
+- [x] `FoodRenderer` draws them, pooled the same way `BubbleSystem` is
 
 **Done when** dropping food reliably pulls a crowd, and the aggressive fish visibly win.
+
+Both measured in play mode, with twelve fish identical in every trait but `aggression`.
+
+**The crowd.** Mean distance from the shoal to a central drop point beforehand: 4.80. After the drop,
+mean distance to the food itself: **1.29**, with **9 of 12 fish within 2 units** and 11 of 12 within 4.
+
+**The winners.**
+
+| | aggression 0.95 | aggression 0.05 |
+|---|---|---|
+| flakes eaten, per fish | **6.2** | **1.5** |
+| seconds between mouthfuls | 0.36 | 1.44 |
+
+Timid fish still eat — every one of the six ate at least one flake — so they lose out rather than
+starve, which is the outcome that reads as competition rather than as a bug.
+
+The first build of this measured **backwards**, and getting from there to here needed a second channel
+for aggression. Worth reading before touching feeding: [decisions.md](decisions.md) D-007.
 
 ## M5 — Persistence — **not started** — *points 24, 28, 29*
 

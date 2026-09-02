@@ -115,8 +115,8 @@ namespace ViitorCloud.FishAquarium.Debugging {
             EnsureStyles();
             RefreshText();
 
-            GUI.Box(new Rect(12f, 12f, 620f, 232f), GUIContent.none, panelStyle);
-            GUI.Label(new Rect(24f, 22f, 600f, 214f), cachedText, labelStyle);
+            GUI.Box(new Rect(12f, 12f, 620f, 284f), GUIContent.none, panelStyle);
+            GUI.Label(new Rect(24f, 22f, 600f, 266f), cachedText, labelStyle);
         }
 
         private void RefreshText() {
@@ -145,9 +145,11 @@ namespace ViitorCloud.FishAquarium.Debugging {
             }
 
             AppendPointerLine();
+            AppendFeedingLine();
             AppendNewestFishTraits();
 
-            textBuilder.Append("F1 overlay   F2 test fish   F3 clear   F4 rescan   ESC quit");
+            textBuilder.Append("F1 overlay   F2 test fish   F3 clear   F4 rescan   ESC quit\n");
+            textBuilder.Append("click near the surface to feed, lower down for a ripple");
 
             cachedText = textBuilder.ToString();
         }
@@ -170,7 +172,46 @@ namespace ViitorCloud.FishAquarium.Debugging {
 
             textBuilder.Append("Pointer: ").Append(pointer.IsAvailable ? "ok" : "away");
             textBuilder.Append("   speed: ").Append(pointer.Speed.ToString("F1"));
-            textBuilder.Append("   ripples: ").Append(aquariumManager.Ripples != null ? aquariumManager.Ripples.ActiveCount : 0).Append('\n');
+            textBuilder.Append("   ripples: ").Append(aquariumManager.Ripples != null ? aquariumManager.Ripples.ActiveCount : 0);
+            textBuilder.Append("   food: ").Append(aquariumManager.Food != null ? aquariumManager.Food.ActiveCount : 0).Append('\n');
+        }
+
+        /// <summary>
+        /// Who is actually winning the food. Whether the aggressive fish are eating more than the timid
+        /// ones is the acceptance criterion for feeding, and it is not something you can judge by watching
+        /// a tank of two hundred fish - so the numbers are put on screen instead.
+        /// </summary>
+        private void AppendFeedingLine() {
+            if (aquariumManager == null || aquariumManager.ActiveFish.Count == 0) {
+                return;
+            }
+
+            float aggressiveEaten = 0f;
+            float timidEaten = 0f;
+            int aggressiveCount = 0;
+            int timidCount = 0;
+
+            for (int i = 0; i < aquariumManager.ActiveFish.Count; i++) {
+                FishController fish = aquariumManager.ActiveFish[i];
+                if (fish == null || fish.Data == null || fish.Data.Traits == null) {
+                    continue;
+                }
+
+                if (fish.Data.Traits.Aggression >= 0.5f) {
+                    aggressiveEaten += fish.FoodEaten;
+                    aggressiveCount++;
+                } else {
+                    timidEaten += fish.FoodEaten;
+                    timidCount++;
+                }
+            }
+
+            if (aggressiveCount == 0 && timidCount == 0) {
+                return;
+            }
+
+            textBuilder.Append("Eaten per fish: aggressive ").Append(aggressiveCount == 0 ? 0f : (aggressiveEaten / aggressiveCount));
+            textBuilder.Append("   timid ").Append(timidCount == 0 ? 0f : (timidEaten / timidCount)).Append('\n');
         }
 
         /// <summary>

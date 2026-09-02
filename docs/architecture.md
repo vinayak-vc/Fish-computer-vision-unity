@@ -119,9 +119,77 @@ flee response into an approach once it is high enough.
 ## Simulation loop
 
 `AquariumManager` owns the population and drives a single `Update`. No fish runs an `Update` of its
-own: the manager rebuilds a position snapshot once per frame, then ticks every `FishController`,
-which forwards to `FishMovement` and `FishAnimator`. Neighbour queries read the snapshot, so
-separation costs one pass over an array rather than a physics query per fish.
+own: the manager rebuilds the neighbour index once per frame, then ticks every `FishController`,
+which forwards to `FishMovement` and `FishAnimator`.
+
+## Neighbours and flocking
+
+```
+AquariumManager.Update
+  └─ RebuildNeighbourIndex          one linear pass over the population
+       ├─ snapshotPositions[]       parallel arrays, grown once then reused
+       ├─ snapshotHeadings[]
+       ├─ snapshotNovelty[]         how recently each fish arrived
+       ├─ novelIndices[]            the few that still draw a crowd; usually empty
+       └─ FishSpatialHash.Build     counting sort into cell order
+
+FishMovement.BuildSteeringVector
+  └─ AquariumManager.CalculateFlocking     one query per fish
+       ├─ FishSpatialHash.Query            candidates from the touched cells
+       ├─ separation   FishSteering.SeparationContribution   inside the separation radius
+       ├─ alignment    FishFlocking.AlignmentDirection       weighted by social
+       ├─ cohesion     FishFlocking.CohesionDirection        weighted by social
+       └─ recognition  FishFlocking.NoveltyAttraction        walks novelIndices directly
+```
+
+`FishSpatialHash` is a uniform grid, rebuilt every frame and allocation-free after the arrays have
+grown to fit. It is a **broad phase only**: `Query` returns the occupants of every cell the query
+circle touches, and the caller measures. That split is what lets one query serve both the separation
+radius (1.0) and the wider neighbour radius (2.6) — the narrow-phase test is a squared-distance
+comparison inside the accumulation loop.
+
+`maxNeighboursConsidered` caps how many candidates one fish will look at. It is a deliberate quality
+trade: when the whole shoal piles into one corner, holding the frame matters more than a complete
+neighbour list.
+
+Alignment and cohesion return **directions, never magnitudes**. Returning the raw offset to the
+centre of the school would pull a fish with forty neighbours forty times harder than one with two,
+and dense schools would collapse to a point. Their strength comes entirely from the config weights
+and the `social` response curves, so a solitary fish gets neither term and keeps to the edges.
+
+Recognition — design point 16, a new drawing drawing a crowd — is kept out of the spatial query on
+purpose. See [decisions.md](decisions.md) D-006.
+
+## Feeding
+
+```
+IPointerSource.Pressed ──> AquariumManager.HandlePointerPressed
+                             ├─ near the surface ──> FoodField.Emit × FoodPerPinch
+                             └─ anywhere else ────> RippleField.Emit
+
+AquariumManager.Update
+  ├─ FoodField.Tick            sink towards the floor, retire stale flakes
+  ├─ fish tick ──> CalculateFoodAttraction ──> FoodField.SubmitClaim   (claims gather)
+  └─ ResolveFoodClaims ──────> FoodField.ResolveClaims                 (winners eat)
+
+FoodRenderer.LateUpdate ──> FoodField.TryGetParticle    presentation only, never writes
+```
+
+A press near the surface feeds and **deliberately does not also ripple**: scattering the shoal away
+from food the visitor just dropped would be the opposite of the gesture's purpose.
+
+**Claiming is two-phase and has to be.** Fish stake claims as they tick; winners are resolved only
+once every fish has had its say. Consuming a flake the moment the first fish touched it would award it
+by list order — an ordering the visitor cannot see — and `aggression`, the trait meant to decide it,
+would never be consulted.
+
+Aggression reaches feeding through two channels, and the second is not optional: see
+[decisions.md](decisions.md) D-007 for why winning contests alone left the trait doing nothing
+measurable.
+
+`FoodField` is a plain class, like `RippleField`, so the whole feeding model is unit-testable without
+a scene. `FoodRenderer` is a separate MonoBehaviour that only reads it, so turning the visuals off
+could never change how fish behave.
 
 `AquariumBounds` is the logical swimming area in world units. Nothing in the fish code reads screen
 pixels, so every aspect ratio and a mid-session window resize all behave identically; a resize

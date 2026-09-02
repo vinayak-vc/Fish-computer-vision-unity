@@ -24,6 +24,10 @@ namespace ViitorCloud.FishAquarium.Fish {
         private float depthScaleMultiplier = 1f;
         private float depthAlpha = 1f;
         private float animationTimer;
+        private float ageSeconds;
+        private int foodEaten;
+        private float eatCooldownRemaining;
+        private bool suppressNovelty;
         private bool initialised;
 
         public FishData Data { get; private set; }
@@ -46,6 +50,50 @@ namespace ViitorCloud.FishAquarium.Fish {
 
         public FishMovement Movement {
             get { return movement; }
+        }
+
+        /// <summary> Seconds this fish has been swimming. Zero for a fish that has only just been created. </summary>
+        public float AgeSeconds {
+            get { return ageSeconds; }
+        }
+
+        /// <summary>
+        /// Flakes of food this fish has won. Surfaced in the debug overlay, because whether the aggressive
+        /// fish are actually winning is not something you can reliably judge by watching.
+        /// </summary>
+        public int FoodEaten {
+            get { return foodEaten; }
+        }
+
+        /// <summary>
+        /// False while the fish is still swallowing the last flake. AquariumManager will not stake a claim
+        /// on its behalf until this comes back, which both bounds how fast one fish can hoover a pile and
+        /// gives the aggression trait somewhere to show.
+        /// </summary>
+        public bool CanEat {
+            get { return eatCooldownRemaining <= 0f; }
+        }
+
+        /// <summary> Called by AquariumManager when this fish wins a flake. Starts its chewing cooldown. </summary>
+        public void RecordFoodEaten() {
+            foodEaten++;
+            eatCooldownRemaining = Data != null ? Data.EatCooldownSeconds : 0f;
+        }
+
+        /// <summary>
+        /// How interesting this fish still is to its neighbours: 1 immediately after it is drawn, falling
+        /// to 0 across noveltySeconds. Design point 16, a new arrival draws a curious crowd.
+        ///
+        /// Always 0 for a replayed capture. A replay is the aquarium restoring fish it already had, not
+        /// announcing arrivals, so a restart would otherwise have the whole tank swarm ten fish at once -
+        /// the same reason replays suppress the birth animation.
+        /// </summary>
+        public float EvaluateNovelty(float noveltySeconds) {
+            if (suppressNovelty || noveltySeconds <= 0f || !initialised) {
+                return 0f;
+            }
+
+            return 1f - Mathf.Clamp01(ageSeconds / noveltySeconds);
         }
 
         private void Awake() {
@@ -88,6 +136,12 @@ namespace ViitorCloud.FishAquarium.Fish {
             movement.Initialize(this, Data, config, bounds, manager, spriteRenderer, initialHeading);
             fishAnimator.Initialize(Data, config);
 
+            ageSeconds = 0f;
+            eatCooldownRemaining = 0f;
+
+            // A replay is a restoration, not an arrival, so it neither celebrates nor draws a crowd.
+            suppressNovelty = skipEntranceAnimation;
+
             if (skipEntranceAnimation) {
                 State = FishLifecycleState.Swimming;
                 animationTimer = config.SpawnAnimationDuration;
@@ -119,6 +173,12 @@ namespace ViitorCloud.FishAquarium.Fish {
         public void Tick(float deltaTime) {
             if (!initialised) {
                 return;
+            }
+
+            ageSeconds += deltaTime;
+
+            if (eatCooldownRemaining > 0f) {
+                eatCooldownRemaining -= deltaTime;
             }
 
             switch (State) {

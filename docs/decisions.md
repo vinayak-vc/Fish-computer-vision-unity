@@ -4,6 +4,100 @@ Newest first. Each entry records what was decided, why, and what it costs.
 
 ---
 
+## D-007 — Aggression needs a channel that always applies, not just contested flakes
+
+**Decision.** Aggression decides two things about feeding, not one: who wins a flake two fish both
+reach, *and* how long a fish waits between mouthfuls (`aggressionEatCooldownRange`, 1.5 s at
+aggression 0 down to 0.3 s at aggression 1).
+
+**Why.** Winning contests alone did not work, and the way it failed is worth recording because it
+looked fine from the outside.
+
+Built as the brief literally describes it — curiosity steers, aggression breaks ties — the first
+measurement came out **backwards**: twelve fish identical but for aggression, and the timid ones ate
+8.5 flakes each against the aggressive ones' 0.5. The claim logic was correct and its unit tests
+passed. The real cause was that **contests almost never happened.** Each fish independently targets
+its own nearest flake, so a shoal spreads itself across a pile rather than converging on one crumb.
+With no contest, aggression never entered the calculation at all, and the outcome fell to arrival
+order — three lucky fish ate 53 of the 54 flakes between them.
+
+So the trait had no observable effect, and the milestone's criterion — "the aggressive fish visibly
+win" — could not be met by the literal reading. A per-fish cooldown scaled by aggression fixes both
+problems at once: it stops any single fish hoovering a pile, and it gives aggression a channel that
+applies on every mouthful rather than only in the rare contested case. Re-measured: **6.2 flakes per
+aggressive fish against 1.5 per timid one**, and every timid fish still ate at least one, so they lose
+out rather than starve.
+
+**Cost.** A reading of "compete for them weighted by aggression" slightly broader than the brief's
+wording. It is still competition — a pushy fish taking more turns at a shared pile is what
+competition looks like when the pile is big enough that nobody has to fight over a single crumb.
+
+**The general lesson**, worth keeping for M6 and M7: a trait wired only into a rare branch is
+indistinguishable from a trait wired into nothing. Measure whether the branch is actually taken.
+
+---
+
+## D-006 — One neighbour query per fish, serving separation, alignment, cohesion and recognition
+
+**Decision.** `AquariumManager.CalculateSeparation` is gone, replaced by `CalculateFlocking`, which runs
+a single `FishSpatialHash` query per fish and derives all three boid rules from it. New-arrival
+recognition is deliberately *not* part of that query.
+
+**Why one query.** The separation radius (1.0) is much smaller than the neighbour radius (2.6), so a
+query at the wider of the two already contains every fish either rule needs. Filtering by squared
+distance inside the loop costs one comparison; a second query would cost another grid traversal.
+
+**Why the grid at all.** The old sweep was O(n²) across a frame. At the authored ceiling of thirty
+fish that was genuinely cheaper than a grid, and the old comment said so honestly. The milestone asks
+for two hundred, where it is not.
+
+Worth being precise about the size of the win, because it is smaller than "O(n²) to O(n)" suggests:
+the tank is small relative to the neighbour radius, so a 3×3 cell block already covers a good fraction
+of it. The real property is that cost now scales with *local density* rather than with total
+population, and `maxNeighboursConsidered` caps it outright when a shoal clumps.
+
+Two measurements, and they answer different questions. Both were taken under Mono, so a player build
+on IL2CPP should do better.
+
+**Scaling — the query itself against the sweep it replaced**, uniformly distributed fish in a 20×7.5
+tank, broad phase plus the squared-distance test and nothing else:
+
+| population | hash | sweep | speedup |
+|---|---|---|---|
+| 30 | 0.006 ms | 0.007 ms | 1.1× |
+| 100 | 0.036 ms | 0.081 ms | 2.3× |
+| 200 | 0.089 ms | 0.338 ms | 3.8× |
+| 400 | 0.186 ms | 1.366 ms | 7.3× |
+
+The hash roughly doubles as the population doubles while the sweep roughly quadruples, which is the
+scaling this change was for. Note the first row: at thirty fish the difference is within noise, so the
+old code's comment claiming a sweep beat a grid at that ceiling was accurate. This only earns its
+place at the populations the milestone asks for.
+
+**Actual cost — the whole `CalculateFlocking` pass**, measured in the running scene with 200 real
+fish at their real clustered positions:
+
+> **0.671 ms per frame, 4.0% of a 60 fps budget, 3.4 µs per fish.**
+
+That is the number to quote. It is 7½ times the 0.089 ms above because the real pass also evaluates
+two `AnimationCurve`s per fish, accumulates alignment and cohesion, calls
+`FishSteering.SeparationContribution`, walks the novel list, and works on clumped rather than uniform
+positions — clumping means more candidates survive to the narrow phase. The micro-benchmark isolates
+the data structure; this measures the feature.
+
+**Why recognition is separate.** Design point 16 wants a new arrival noticed from further away than a
+schoolmate — the novelty radius is 5.0 against a neighbour radius of 2.6. Routing it through the same
+query would force the grid's cell size up to 5.0, which on a 20×7.5 tank leaves about ten cells and
+makes every ordinary neighbour query nearly a full sweep. Instead, novel fish are collected into a
+small list during the snapshot rebuild and walked directly. There are usually none, and never more
+than a handful, so the list is cheaper than any index over it would be.
+
+**Cost.** `CalculateSeparation` was public API, so this breaks AGENTS.md rule 10. Its only caller was
+`FishMovement`, which this milestone changes anyway, and leaving a wrapper would have left an unused
+abstraction — rule 11. The rebuild also allocates on the first few frames, then never again.
+
+---
+
 ## D-005 — `preferred_depth` and parallax `Depth` are kept as separate axes
 
 **Decision.** The contract's `preferred_depth` (0 surface, 1 floor) becomes `FishTraits.PreferredDepth`

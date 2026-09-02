@@ -30,6 +30,7 @@ namespace ViitorCloud.FishAquarium.Fish {
         private FishData data;
 
         private Vector2 currentTarget;
+        private Vector2 pendingFoodPull;
         private float headingDegrees;
         private float currentSpeed;
         private float depthSpeedMultiplier = 1f;
@@ -52,6 +53,11 @@ namespace ViitorCloud.FishAquarium.Fish {
 
         public float HeadingDegrees {
             get { return headingDegrees; }
+        }
+
+        /// <summary> Unit vector this fish is swimming along. Read once per frame by the flocking snapshot. </summary>
+        public Vector2 ForwardDirection {
+            get { return FishSteering.DirectionFromHeading(headingDegrees); }
         }
 
         public float CurrentSpeed {
@@ -114,6 +120,17 @@ namespace ViitorCloud.FishAquarium.Fish {
             Vector2 position = Position;
 
             UpdatePointerState(position, deltaTime);
+
+            // Queried before target selection, and only once a frame, because a resting fish has to be
+            // woken by food. Steering it towards a flake while its goal speed was still zero would leave
+            // it hovering next to a meal it never took.
+            pendingFoodPull = aquariumManager != null ? aquariumManager.CalculateFoodAttraction(owner, position, data.Traits) : Vector2.zero;
+
+            if (pendingFoodPull.sqrMagnitude > DirectionEpsilon) {
+                isIdle = false;
+                idleTimer = 0f;
+            }
+
             UpdateTargetSelection(area, position, deltaTime);
 
             Vector2 steer = BuildSteeringVector(area, position);
@@ -266,15 +283,18 @@ namespace ViitorCloud.FishAquarium.Fish {
 
             Vector2 avoidance = FishSteering.BoundsAvoidance(position, area, config.BoundsAvoidanceMargin) * config.BoundsAvoidanceStrength;
 
-            Vector2 separation = Vector2.zero;
-            if (config.SeparationEnabled && aquariumManager != null) {
-                separation = aquariumManager.CalculateSeparation(owner, position, config.SeparationRadius) * config.SeparationStrength;
+            // Separation, alignment, cohesion and the pull of a new arrival, all from one neighbour query.
+            Vector2 flocking = Vector2.zero;
+            if (aquariumManager != null) {
+                flocking = aquariumManager.CalculateFlocking(owner, position, FishSteering.DirectionFromHeading(headingDegrees), data.Traits);
             }
 
             Vector2 pointerForce = BuildPointerForce(position);
             Vector2 depthPull = BuildPreferredDepthPull(area, position);
 
-            Vector2 steer = desired + avoidance + separation + pointerForce + depthPull;
+            // pendingFoodPull was resolved at the top of the tick, so the claim on a flake is staked once
+            // per frame rather than once per steering evaluation.
+            Vector2 steer = desired + avoidance + flocking + pendingFoodPull + pointerForce + depthPull;
             if (steer.sqrMagnitude <= DirectionEpsilon) {
                 return desired;
             }

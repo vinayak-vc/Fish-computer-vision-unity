@@ -42,21 +42,54 @@ Live task list. Completed work is kept, briefly, so the next agent can see what 
 
 ---
 
-## Next — M3, flocking and recognition
+## Done — M3, flocking and recognition
 
-1. **Spatial hash for neighbour queries.** `AquariumManager.CalculateSeparation` is currently an O(n²)
-   sweep over the frame snapshot. It is fine at the configured cap of 30 but the milestone calls for
-   200 agents at 60 fps, so this is the first thing to change and it should be a pure, testable class
-   in `Scripts/Fish/` alongside `FishSteering`.
-2. **Boids.** Separation already exists. Add alignment and cohesion, both weighted by `FishTraits.Social`,
-   through response curves on `AquariumConfig` in the same style as the M1 block.
-3. **Curious neighbours.** A newly spawned fish draws nearby fish for a few seconds, weighted by
-   `Curiosity`. `AquariumManager.FishSpawned` already fires the event this needs.
+- [x] `FishSpatialHash`: uniform grid, counting sort, rebuilt each frame, allocation-free once warm.
+- [x] `FishFlocking`: alignment and cohesion as pure functions returning directions, never magnitudes.
+- [x] `AquariumManager.CalculateFlocking` replaces `CalculateSeparation` and serves all three boid
+      rules from one query.
+- [x] Social response curves on `AquariumConfig`, so a solitary fish gets no alignment or cohesion.
+- [x] New-arrival recognition via a per-fish novelty that decays over `noveltySeconds`; replayed
+      captures are never novel, for the same reason they skip the birth animation.
+- [x] `FishController.AgeSeconds`, which M5 and M6 will both want.
 
-**Acceptance:** high-`social` fish form visible schools while low-`social` fish stay at the edges, with
-200 agents holding 60 fps.
+- [x] Verified: 214 edit-mode tests pass, schooling and recognition measured in play mode, and the
+      flocking pass costs 0.671 ms at 200 live fish. Figures in [roadmap.md](roadmap.md) under M3.
 
-## Then — M4 feeding, M5 persistence
+## Done — M4, feeding
+
+- [x] `FoodField`: pooled, sinking, staling, with two-phase claim resolution.
+- [x] `FoodRenderer` and `ProceduralSpriteLibrary.GetPellet`, so food is actually visible.
+- [x] Surface press feeds, deeper press ripples, and the two never both fire.
+- [x] Food wakes an idle fish, so a resting one does not hover next to a meal it never takes.
+- [x] `aggression` gates both who wins a flake and the cadence between mouthfuls — see
+      [decisions.md](decisions.md) D-007, which explains why the first version measured backwards.
+- [x] `FishController.FoodEaten` and a debug-overlay line, because who is winning is not something
+      you can judge by watching a tank.
+- [x] Verified: 235 edit-mode tests pass; crowd and competition measured in play mode.
+
+## Next — M5, persistence
+
+Design points 24, 28, 29. Unity owns all runtime state; Python owns only the artwork and the birth
+certificate. Save to `Application.persistentDataPath`.
+
+**Acceptance:** the tank comes back exactly as it was after a full machine restart, with Python off.
+
+1. **Decide the capture-registry question first.** It is the one part with a real design choice in it.
+   `FishPayloadDecodeQueue` holds a `FishCaptureRegistry` for the session only. If it stays that way, a
+   restarted Unity will restore its fish from disk *and then* re-admit every id in Python's replay
+   window as a brand new arrival — duplicating the tank on every restart, which is exactly the failure
+   M0 exists to prevent. The registry has to be persisted alongside the fish, or keyed off what was
+   restored.
+2. **Cache the decoded PNG locally.** Contract section 8's replay window is ten captures; anything
+   older is gone. Without a local cache, a tank of fifty fish cannot come back.
+3. **Persist per fish:** id, traits, position, `Affection`, `AgeSeconds`, `FoodEaten`, and later
+   relationships. `FishMovement.Affection` and `FishController.AgeSeconds` are already live values with
+   no way to restore them; a `RestoreAffection` setter was deliberately left unwritten rather than
+   shipped unused, and this is where it lands.
+4. **Restore silently.** A restored fish is exactly the replay case that already exists: no birth
+   animation, and no novelty, or a restart will have the whole tank swarm the fish it just reloaded.
+5. **Then the birth moment and the "created today" counter,** driven by `sequence` and `timestamp`.
 
 M5 has one piece of groundwork already waiting for it: `FishMovement.Affection` is a live per-fish
 value with no way to restore a saved one. A `RestoreAffection` setter was deliberately left out rather

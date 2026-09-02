@@ -109,6 +109,33 @@ namespace ViitorCloud.FishAquarium.Core {
         [SerializeField] private float separationRadius = 1.0f;
         [SerializeField] private float separationStrength = 0.9f;
 
+        [Header("Flocking")]
+        [Tooltip("Alignment and cohesion, the other two thirds of boids. Separation above is the first third and is independent of this switch.")]
+        [SerializeField] private bool flockingEnabled = true;
+        [Tooltip("How far a fish looks for schoolmates. Also sets the spatial hash cell size, so raising it makes neighbour queries wider and slower.")]
+        [SerializeField] private float neighbourRadius = 2.6f;
+        [Tooltip("Turn towards the average heading of the school, at social 1.")]
+        [SerializeField] private float alignmentStrength = 1.15f;
+        [Tooltip("Draw towards the centre of the school, at social 1. Kept below the depth homing strength so a school still respects its water layer.")]
+        [SerializeField] private float cohesionStrength = 0.95f;
+        [Tooltip("Social to alignment weight. A solitary fish should get nothing here, or low-social fish will drift into the schools they are supposed to stay out of.")]
+        [SerializeField] private AnimationCurve socialAlignmentResponse = AnimationCurve.Linear(0f, 0f, 1f, 1f);
+        [Tooltip("Social to cohesion weight.")]
+        [SerializeField] private AnimationCurve socialCohesionResponse = AnimationCurve.Linear(0f, 0f, 1f, 1f);
+        [Tooltip("Neighbours one fish will consider in a frame. A hard ceiling on the per-fish cost when the whole shoal piles into one corner, which is exactly when the frame budget matters.")]
+        [SerializeField] private int maxNeighboursConsidered = 32;
+
+        [Header("New Arrival Recognition")]
+        [Tooltip("A fish that has just been drawn draws a crowd, and the crowd is made of the curious ones. Design point 16.")]
+        [SerializeField] private bool noveltyEnabled = true;
+        [Tooltip("Seconds a new fish stays interesting. Its pull fades to nothing across this.")]
+        [SerializeField] private float noveltySeconds = 5f;
+        [Tooltip("How far the interest carries. Larger than the neighbour radius on purpose - fish notice an arrival from across part of the tank.")]
+        [SerializeField] private float noveltyRadius = 5f;
+        [SerializeField] private float noveltyAttractionStrength = 1.7f;
+        [Tooltip("Curiosity to how strongly this fish investigates an arrival.")]
+        [SerializeField] private AnimationCurve curiosityNoveltyResponse = AnimationCurve.Linear(0f, 0f, 1f, 1f);
+
         [Header("Fish Orientation")]
         [Tooltip("Describes the source PNG, not the swimming direction: tick it only when the drawings have their nose pointing RIGHT. The sample drawings face left, so this is off by default. Getting it wrong makes every fish swim tail first.")]
         [SerializeField] private bool artworkFacesRight = false;
@@ -181,6 +208,36 @@ namespace ViitorCloud.FishAquarium.Core {
         [Tooltip("Affection above which fear inverts into approach. Below it, affection only softens the flee response.")]
         [Range(0f, 1f)]
         [SerializeField] private float affectionTrustThreshold = 0.55f;
+
+        [Header("Feeding")]
+        [Tooltip("A press near the surface drops food instead of a ripple. Design point 2.")]
+        [SerializeField] private bool feedingEnabled = true;
+        [Tooltip("How much of the tank height, measured down from the surface, counts as the feeding band. A press inside it feeds; anywhere else sends a shockwave.")]
+        [Range(0.02f, 0.6f)]
+        [SerializeField] private float feedSurfaceBand = 0.18f;
+        [Tooltip("Flakes dropped per press. A pinch rather than a single crumb, so a crowd has something to form around.")]
+        [SerializeField] private int foodPerPinch = 6;
+        [Tooltip("World-unit horizontal scatter of one pinch.")]
+        [SerializeField] private float foodPinchSpread = 1.5f;
+        [SerializeField] private int maxFoodParticles = 48;
+        [SerializeField] private float foodSinkSpeed = 0.55f;
+        [Tooltip("Seconds before a flake goes stale and vanishes, whether or not anything ate it.")]
+        [SerializeField] private float foodLifetimeSeconds = 16f;
+        [Tooltip("How close a fish must be to eat. Also the range within which fish compete for the same flake.")]
+        [SerializeField] private float foodEatRadius = 0.35f;
+        [Tooltip("How far a fish notices food. Generous on purpose: the crowd is the point.")]
+        [SerializeField] private float foodAwarenessRadius = 5.5f;
+        [Tooltip("Pull towards food. Deliberately stronger than the depth homing, so a surface-dweller will dive for a sinking flake.")]
+        [SerializeField] private float foodAttractionStrength = 2.6f;
+        [Tooltip("Curiosity to how hard this fish goes for food. Note the curve does not start at zero: a fish that never noticed food at all would look broken rather than incurious.")]
+        [SerializeField] private AnimationCurve curiosityFoodResponse = AnimationCurve.Linear(0f, 0.3f, 1f, 1f);
+        [Tooltip("Seconds between mouthfuls, across the aggression range. Inverted on purpose: a pushy fish is straight back in for the next flake, a timid one hesitates. This is what makes aggression visible when flakes are spread out and no two fish are actually contesting one.")]
+        [SerializeField] private FloatRange aggressionEatCooldownRange = new FloatRange(1.5f, 0.3f);
+
+        [Header("Food Appearance")]
+        [SerializeField] private Color foodColour = new Color(0.72f, 0.46f, 0.22f, 1f);
+        [SerializeField] private float foodWorldSize = 0.14f;
+        [SerializeField] private int foodSortingOrder = 210;
 
         [Header("Socket.IO Source")]
         [Tooltip("Receive fish from the Python capture station over Socket.IO. Independent of the folder watcher; both can run at once.")]
@@ -521,6 +578,114 @@ namespace ViitorCloud.FishAquarium.Core {
             get { return separationStrength; }
         }
 
+        public bool FlockingEnabled {
+            get { return flockingEnabled; }
+        }
+
+        public float NeighbourRadius {
+            get { return neighbourRadius; }
+        }
+
+        public float AlignmentStrength {
+            get { return alignmentStrength; }
+        }
+
+        public float CohesionStrength {
+            get { return cohesionStrength; }
+        }
+
+        public AnimationCurve SocialAlignmentResponse {
+            get { return socialAlignmentResponse; }
+        }
+
+        public AnimationCurve SocialCohesionResponse {
+            get { return socialCohesionResponse; }
+        }
+
+        public int MaxNeighboursConsidered {
+            get { return maxNeighboursConsidered; }
+        }
+
+        public bool NoveltyEnabled {
+            get { return noveltyEnabled; }
+        }
+
+        public float NoveltySeconds {
+            get { return noveltySeconds; }
+        }
+
+        public float NoveltyRadius {
+            get { return noveltyRadius; }
+        }
+
+        public float NoveltyAttractionStrength {
+            get { return noveltyAttractionStrength; }
+        }
+
+        public AnimationCurve CuriosityNoveltyResponse {
+            get { return curiosityNoveltyResponse; }
+        }
+
+        public bool FeedingEnabled {
+            get { return feedingEnabled; }
+        }
+
+        public float FeedSurfaceBand {
+            get { return feedSurfaceBand; }
+        }
+
+        public int FoodPerPinch {
+            get { return foodPerPinch; }
+        }
+
+        public float FoodPinchSpread {
+            get { return foodPinchSpread; }
+        }
+
+        public int MaxFoodParticles {
+            get { return maxFoodParticles; }
+        }
+
+        public float FoodSinkSpeed {
+            get { return foodSinkSpeed; }
+        }
+
+        public float FoodLifetimeSeconds {
+            get { return foodLifetimeSeconds; }
+        }
+
+        public float FoodEatRadius {
+            get { return foodEatRadius; }
+        }
+
+        public float FoodAwarenessRadius {
+            get { return foodAwarenessRadius; }
+        }
+
+        public float FoodAttractionStrength {
+            get { return foodAttractionStrength; }
+        }
+
+        public AnimationCurve CuriosityFoodResponse {
+            get { return curiosityFoodResponse; }
+        }
+
+        public FloatRange AggressionEatCooldownRange {
+            get { return aggressionEatCooldownRange; }
+        }
+
+        public Color FoodColour {
+            get { return foodColour; }
+        }
+
+        public float FoodWorldSize {
+            get { return foodWorldSize; }
+        }
+
+        public int FoodSortingOrder {
+            get { return foodSortingOrder; }
+        }
+
         public bool ArtworkFacesRight {
             get { return artworkFacesRight; }
         }
@@ -742,6 +907,29 @@ namespace ViitorCloud.FishAquarium.Core {
                 fileSearchPattern = "*.png";
             }
 
+            feedSurfaceBand = Mathf.Clamp(feedSurfaceBand, 0.02f, 0.6f);
+            foodPerPinch = Mathf.Max(1, foodPerPinch);
+            foodPinchSpread = Mathf.Max(0f, foodPinchSpread);
+            maxFoodParticles = Mathf.Max(1, maxFoodParticles);
+            foodSinkSpeed = Mathf.Max(0f, foodSinkSpeed);
+            foodLifetimeSeconds = Mathf.Max(0.1f, foodLifetimeSeconds);
+            foodEatRadius = Mathf.Max(0.01f, foodEatRadius);
+            foodAwarenessRadius = Mathf.Max(foodEatRadius, foodAwarenessRadius);
+            foodAttractionStrength = Mathf.Max(0f, foodAttractionStrength);
+            foodWorldSize = Mathf.Max(0.01f, foodWorldSize);
+
+            // Deliberately NOT Normalized(): the range runs high-to-low, because a more aggressive fish
+            // waits less between mouthfuls.
+            aggressionEatCooldownRange = new FloatRange(Mathf.Max(0f, aggressionEatCooldownRange.Min), Mathf.Max(0f, aggressionEatCooldownRange.Max));
+
+            neighbourRadius = Mathf.Max(separationRadius, neighbourRadius);
+            alignmentStrength = Mathf.Max(0f, alignmentStrength);
+            cohesionStrength = Mathf.Max(0f, cohesionStrength);
+            maxNeighboursConsidered = Mathf.Max(1, maxNeighboursConsidered);
+            noveltySeconds = Mathf.Max(0f, noveltySeconds);
+            noveltyRadius = Mathf.Max(0.01f, noveltyRadius);
+            noveltyAttractionStrength = Mathf.Max(0f, noveltyAttractionStrength);
+
             foregroundAreaAtMinimumSize = Mathf.Max(1, foregroundAreaAtMinimumSize);
             foregroundAreaAtMaximumSize = Mathf.Max(foregroundAreaAtMinimumSize + 1, foregroundAreaAtMaximumSize);
             preferredDepthBandHeight = Mathf.Clamp(preferredDepthBandHeight, 0.05f, 1f);
@@ -777,6 +965,10 @@ namespace ViitorCloud.FishAquarium.Core {
             graceTailAmplitudeResponse = RepairCurve(graceTailAmplitudeResponse, 0f, 1f);
             speedTailFrequencyResponse = RepairCurve(speedTailFrequencyResponse, 0f, 1f);
             speedIdleResponse = RepairCurve(speedIdleResponse, 1f, 0f);
+            socialAlignmentResponse = RepairCurve(socialAlignmentResponse, 0f, 1f);
+            socialCohesionResponse = RepairCurve(socialCohesionResponse, 0f, 1f);
+            curiosityNoveltyResponse = RepairCurve(curiosityNoveltyResponse, 0f, 1f);
+            curiosityFoodResponse = RepairCurve(curiosityFoodResponse, 0.3f, 1f);
 
             fishWorldSizeRange = fishWorldSizeRange.Normalized();
             speedRange = speedRange.Normalized();

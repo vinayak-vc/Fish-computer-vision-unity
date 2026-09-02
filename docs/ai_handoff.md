@@ -5,8 +5,16 @@ assumption another agent continues tomorrow with no memory of this session.
 
 **Last updated:** 2026-09-02
 **Branch:** `development`
-**State:** M0, M1 and M2 complete. 186 edit-mode tests, all passing. Project compiles clean, and the
-whole ingest-to-swimming path has been exercised in play mode.
+**State:** M0 through M4 complete. 235 edit-mode tests, all passing. Project compiles clean, and
+ingest, locomotion, pointer interaction, schooling, recognition and feeding have all been measured in
+play mode.
+
+> **If the Editor stops compiling.** It wedged once during this work: script compilation was requested
+> and never ran, and `Library/ScriptAssemblies` went stale while the Editor stayed otherwise
+> responsive. `UnlockReloadAssemblies`, forced synchronous import, and a clean-build-cache compile
+> request all failed to shift it; **restarting the Editor fixed it immediately**. Restart first rather
+> than spending time on it. If Unity is unavailable altogether, the section at the bottom of this file
+> shows how to compile and exercise the code with Unity's own Roslyn and Mono.
 
 ---
 
@@ -33,6 +41,10 @@ interact with the tank through an abstraction that a hand tracker could later re
 | `Scripts/Input/MousePointerSource.cs` | The only implementation today. |
 | `Scripts/Input/PointerInfluence.cs` | Interaction rules as pure, testable functions. |
 | `Scripts/Input/RippleField.cs` | Click shockwaves and their danger zones. |
+| `Scripts/Fish/FishSpatialHash.cs` | Uniform grid replacing the O(n²) neighbour sweep. |
+| `Scripts/Fish/FishFlocking.cs` | Alignment, cohesion, and the pull of a new arrival. |
+| `Scripts/Aquarium/FoodField.cs` | Food: sinking, staling, and who gets it. |
+| `Scripts/Aquarium/FoodRenderer.cs` | Draws it. Presentational only, never writes to the field. |
 
 ### Modified files
 
@@ -112,11 +124,68 @@ predates this session.
 
 ---
 
+## Reproducing the independent compile and logic check
+
+Useful whenever Unity is unavailable, and the only reason M3 has any verification at all. Unity ships
+Roslyn and Mono, and the IDE-generated `.csproj` files already carry the exact reference set and
+defines Unity itself uses:
+
+```bash
+grep -oE "<HintPath>[^<]+</HintPath>" FishAquarium.csproj | sed -e 's|<HintPath>||' -e 's|</HintPath>||' | sed 's|.*|/r:"&"|' > refs.rsp
+```
+
+Add `/r:Library/ScriptAssemblies/BestHTTP.dll` — it is a project reference, so it has no `HintPath` —
+then compile with
+`dotnet "<UnityEditor>/Data/DotNetSdkRoslyn/csc.dll" @your.rsp`, **run from the project root** because
+the reference paths are relative. Run the result with
+`<UnityEditor>/Data/MonoBleedingEdge/bin/mono.exe`. A harmless "Can't find custom attr constructor"
+warning about `UnityEngine.SharedInternalsModule` is expected and does not affect results.
+
+## Measuring behaviour in play mode
+
+Worth knowing, because it is how M1 to M3 were signed off and the same approach will serve M4.
+
+Drive the running scene with `execute_code` rather than by hand: find the components with
+`FindObjectOfType`, inject synthetic captures through `SocketFishIngestService.InjectRawPayload`, and
+read back positions and forces. Two traps caught this session:
+
+- **The C# compiler behind `execute_code` is C# 6.** Local functions are a syntax error; inline the
+  loop instead.
+- **A tool round trip is roughly ten seconds**, which is longer than `noveltySeconds` (5). Anything
+  timed shorter than that cannot be observed across two calls. Either create the fish through
+  `FishFactory` and read the value in the same call, or widen the window by reflecting on the private
+  config field — and put it back afterwards.
+
+To isolate one trait, hold every other trait equal. The schooling measurement used sixteen fish
+differing only in `social`, at one `preferred_depth`, with curiosity and fear zeroed, so nothing else
+could account for the clustering. The recognition measurement went further and evaluated
+`CalculateFlocking` for a curious and an incurious fish at the *same* point, making the difference
+between them the recognition term alone.
+
+**`AquariumConfig` is a ScriptableObject, so runtime edits to it persist in the Editor.** Raising
+`maxFishCount` to 200 for the performance run meant recording the original, using
+`ApplyExternalOverrides` to change it, and restoring it afterwards — then checking the `.asset` on
+disk was still clean. Do the same, and check.
+
+## A pattern worth copying, and one worth avoiding
+
+**Copy this.** `RippleField` and `FoodField` are both plain classes ticked from
+`AquariumManager.Update`, with a separate MonoBehaviour for the visuals where there are any. That
+keeps the whole simulation unit-testable without a scene, keeps the frame order in one place, and
+means presentation can never change behaviour. M6's world systems should be built the same way.
+
+**Avoid this.** M4's first build wired `aggression` into contested food only, exactly as the brief
+words it, and the trait turned out to have no measurable effect because contests almost never happen —
+the tank measured *backwards* on its own acceptance criterion. A trait wired only into a rare branch
+is indistinguishable from a trait wired into nothing. When you connect a trait, measure whether the
+branch is actually taken before believing it works. [decisions.md](decisions.md) D-007 has the full
+account.
+
 ## Next recommended task
 
-**M3, flocking and recognition.** Start with the spatial hash, because
-`AquariumManager.CalculateSeparation` is an O(n²) sweep and the milestone's acceptance criterion is
-200 agents at 60 fps. Full breakdown in [tasks.md](tasks.md).
+**M5, persistence.** Breakdown in [tasks.md](tasks.md). Read item 1 before writing anything: the
+session-only capture registry will duplicate the whole tank on every restart unless it is dealt with,
+which would undo M0.
 
 Before writing anything, read AGENTS.md at the repository root. Its rules on style, `var`, expression
 bodies and brace placement are strict and are enforced by `.editorconfig`; the existing code follows

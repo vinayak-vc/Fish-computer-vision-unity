@@ -52,6 +52,13 @@ namespace ViitorCloud.FishAquarium.Fish {
         public float SteeringDamping { get; private set; }
 
         /// <summary>
+        /// Seconds this fish waits between mouthfuls. From aggression, and inverted: a pushy fish is back
+        /// for the next flake almost at once, a timid one hangs back. Without this, aggression only decides
+        /// the rare case where two fish reach the same flake, and reads as doing nothing.
+        /// </summary>
+        public float EatCooldownSeconds { get; private set; }
+
+        /// <summary>
         /// Parallax: 0 is foreground, 1 is background. Drives scale, opacity, sorting order and speed.
         /// This is NOT personality.preferred_depth, which is the vertical band below. Two different axes.
         /// </summary>
@@ -104,6 +111,8 @@ namespace ViitorCloud.FishAquarium.Fish {
             SwimAmplitude = config.SwimAmplitudeRange.Evaluate(AquariumConfig.EvaluateResponse(config.GraceTailAmplitudeResponse, Traits.Grace));
             SwimFrequency = config.SwimFrequencyRange.Evaluate(AquariumConfig.EvaluateResponse(config.SpeedTailFrequencyResponse, Traits.Speed));
             IdleProbability = config.IdleProbabilityRange.Evaluate(AquariumConfig.EvaluateResponse(config.SpeedIdleResponse, Traits.Speed));
+
+            EatCooldownSeconds = config.AggressionEatCooldownRange.Evaluate(Mathf.Clamp01(Traits.Aggression));
 
             PreferredDepth = Traits.PreferredDepth;
 

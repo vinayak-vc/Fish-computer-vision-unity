@@ -96,6 +96,43 @@ namespace ViitorCloud.FishAquarium.Aquarium {
             return Store(key, texture);
         }
 
+        /// <summary>
+        /// Small solid flake for a food particle. Deliberately not GetBubble tinted brown: a bubble is a
+        /// hollow rim with a highlight, and at food size that reads as a speck of dirt on the glass rather
+        /// than as something to eat. This is filled, with a soft edge and a lit top, so a handful of them
+        /// sinking looks like fish food.
+        /// </summary>
+        public static Sprite GetPellet(int size) {
+            string key = "pellet_" + size;
+
+            Sprite cached;
+            if (cache.TryGetValue(key, out cached) && cached != null) {
+                return cached;
+            }
+
+            Texture2D texture = CreateTexture(size, size, "AquariumFoodPellet");
+            float half = size * 0.5f;
+
+            for (int y = 0; y < size; y++) {
+                for (int x = 0; x < size; x++) {
+                    Vector2 pixel = new Vector2(x + 0.5f, y + 0.5f);
+                    float distance = Vector2.Distance(pixel, new Vector2(half, half)) / half;
+
+                    // Solid to about 70% of the radius, then feathered out so the edge is not a hard
+                    // staircase at the two or three pixels these end up being on screen.
+                    float alpha = 1f - SmoothThreshold(0.7f, 1f, distance);
+
+                    // Lit from above, which is where the aquarium light comes from.
+                    float shade = Mathf.Lerp(0.72f, 1f, Mathf.Clamp01((pixel.y / size) + 0.15f));
+
+                    texture.SetPixel(x, y, new Color(shade, shade, shade, Mathf.Clamp01(alpha)));
+                }
+            }
+
+            texture.Apply(false, false);
+            return Store(key, texture);
+        }
+
         /// <summary> Tapered leaf with a rounded base and a pointed tip, pivoted at the bottom so it can sway from the root. </summary>
         public static Sprite GetLeaf(int width, int height) {
             string key = "leaf_" + width + "x" + height;
