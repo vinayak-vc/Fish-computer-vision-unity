@@ -60,6 +60,21 @@ namespace ViitorCloud.FishAquarium.Input {
             get { return loadQueue.DuplicateCount; }
         }
 
+        /// <summary>
+        /// Marks restored file paths as already ingested. The folder watcher needs this as much as the
+        /// socket does: without it a restart restores every fish from disk and then the startup scan finds
+        /// the same PNGs still sitting in the input folder and spawns them all a second time.
+        /// </summary>
+        public void SeedKnownCaptures(IList<string> captureIds) {
+            if (captureIds == null) {
+                return;
+            }
+
+            for (int i = 0; i < captureIds.Count; i++) {
+                loadQueue.MarkKnown(captureIds[i]);
+            }
+        }
+
         private void Start() {
             if (config == null || fishFactory == null || aquariumManager == null) {
                 Debug.LogError("FishIngestService: dependencies are missing, no fish will be loaded.");

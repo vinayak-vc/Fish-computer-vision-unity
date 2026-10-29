@@ -127,54 +127,93 @@ starve, which is the outcome that reads as competition rather than as a bug.
 The first build of this measured **backwards**, and getting from there to here needed a second channel
 for aggression. Worth reading before touching feeding: [decisions.md](decisions.md) D-007.
 
-## M5 — Persistence — **not started** — *points 24, 28, 29*
+## M5 — Persistence — **done** — *points 24, 28, 29*
 
-Unity owns all runtime state. Save id, traits, position, affection, relationships and age to
-`Application.persistentDataPath`. Cache the decoded PNG locally so a restart does not depend on
-Python's replay window. Plus a one-to-two-second birth moment on live arrival, and a "created
-today" counter driven by `sequence` and `timestamp`.
+- [x] `AquariumPersistenceService`: the roster, written atomically to `persistentDataPath`
+- [x] `FishArtworkCache`: a local copy of every drawing, because Python replays only its ten most recent
+- [x] Capture ids seeded back into **both** ingest services on load
+- [x] Traits saved rather than re-derived, so a fish does not come back a stranger
+- [x] Position, affection, age and food eaten all restored
+- [x] Restores are silent: no entrance animation, no birth moment, no crowd
+- [x] `CaptureCalendar`: the "created today" tally, with a tested midnight rollover
+- [x] A birth moment on live arrival only
 
 **Done when** the tank comes back exactly as it was after a full machine restart, with Python off.
 
-## M6 — World systems — **not started** — *points 11, 14, 15, 17, 18, 20, 25*
+Measured. Five fish with distinct traits were saved, play mode was stopped and restarted, and all five
+came back with their speeds (0.10–0.90), aggressions, mask areas and the tally (5 today, sequence 104)
+intact, `state=Swimming`, `celebrating=False`, `novelty=0.00`.
 
-A single global `aquariumEnergy` (0..1) from pointer activity and recent capture rate, feeding
-speed, bubble density, lighting and particle count. Then a flow field, a day/night and storm cycle,
-a rare procedural predator, and a lifecycle where the oldest fish swim off and fade at the
-population cap. Microphone input is optional and needs nothing from Python.
+Then the part that matters most: Python's replay burst of those same five ids was injected, and **all
+five were dropped as duplicates** — 5 fish, not 10, with `spawnedThisSession=0`. That is the M0
+regression this milestone could most easily have caused, and it does not.
+
+## M6 — World systems — **done** — *points 11, 14, 15, 17, 18, 20, 25*
+
+- [x] `AquariumEnergy`: one 0..1 mood driving fish speed, bubble density and the water's brightness
+- [x] `AquariumFlow`: slow eddies plus a prevailing drift, as a pure function of position and time
+- [x] `AquariumCycle`: a compressed day/night cycle and scheduled storms that ramp in and out
+- [x] `AquariumPredator`: a rare procedural silhouette that crosses the tank and scatters everything
+- [x] Departing fish swim off sideways as they fade, rather than dissolving in place
 
 **Done when** the tank is worth watching for two minutes with nobody touching it.
 
-## M7 — Social bonds — **not started** — *points 5, 8*
+Measured. Four captures lifted energy 0.35 → 1.00, the fish speed multiplier 1.11 → 1.30 and the
+bubble interval 0.282 s → 0.182 s. Currents differ across the tank and roughen under a storm. A
+predator mid-crossing produced panic 0.33 in a fearless fish and 0.66 in a fearful one, both fleeing
+exactly away from it (dot 1.00), and nothing at all from 30 units off.
 
-Sustained proximity forms a pair; a pair produces an egg; the egg hatches a small fish whose colour
-and scale are blended from the parents and whose traits are a noisy average. Unity-side only —
-Python never sees a baby.
+**The microphone is not built.** The brief marks it optional and needing nothing from Python; it is the
+one piece of M6 left, and it is noted in [tasks.md](tasks.md) rather than silently dropped.
 
-## M8 — Non-fish drawings — **not started** — *points 21, 22*
+## M7 — Social bonds — **done** — *points 5, 8*
 
-`object_type`: plants and rocks anchor to the floor, jellyfish drift and pulse and ignore flocking,
-creatures are predator-eligible. `object_confidence < 0.5` still spawns the named type but skips
-type-specific VFX. A misclassification must be survivable, never fatal.
+- [x] `FishBondRegistry`: familiarity per pair, tracked lazily and decaying, so company must be sustained
+- [x] A fish keeps one partner; a pair broods; a brood lays an egg
+- [x] `EggField`: pooled eggs that carry the blend, so neither parent need still exist at hatching
+- [x] `FishTraitBlend`: a noisy average, deterministic per brood, with rarity inherited undrifted
+- [x] A baby wears a parent's drawing tinted with the blend of both parents' Python-measured colours
+- [x] Babies are never saved — they were never drawn, and there is no artwork to rebuild one from
 
-Groundwork done in M1: `FishObjectType` is parsed, carried on `FishTraits` and surfaced in the
-debug overlay. Nothing yet branches on it.
+## M8 — Non-fish drawings — **done** — *points 21, 22*
 
-## M9 — Rarity and anatomy — **not started** — *points 7, 26*
+- [x] `FishBehaviourProfile`: what each `object_type` does, as flags rather than five subclasses
+- [x] Plants and rocks anchor to the floor; plants sway, rocks do not
+- [x] Jellyfish drift slowly, pulse vertically, and ignore flocking
+- [x] Creatures are predator-eligible, and frighten nearby fish when aggressive enough
+- [x] `object_confidence` below 0.5 keeps the behaviour but skips the type-specific effect
 
-`rarity_tier` gates glow, trails and a louder birth moment. When Python's `anatomy` block ships,
-pin eye highlights and tail-bone deformation to the landmarks.
+Measured in one tank holding one of every type. Plant and rock sat on the floor at y = −2.15 against a
+floor of −3.00; an unrecognised `"kraken"` parsed to `Unknown` and swam normally; a jellyfish glowed and
+did not school. The confidence gate: a confident aggressive creature scored threat 0.75, and a
+**guessed** one scored 0.00 — a misclassification does not empty the tank.
 
-Groundwork done in M1: `rarity_tier` is parsed onto `FishTraits`, and the `anatomy` block is parsed
-and covered by wire tests for both its null and its populated shapes. Nothing consumes either yet —
-in particular the top-left to bottom-left y flip is **not** written, and is the first thing M9 needs.
+## M9 — Rarity and anatomy — **done, with one part deferred** — *points 7, 26*
 
-## M10 — Drawing challenges — **blocked** — *point 27*
+- [x] `FishRarityProfile`: glow from the continuous score, trails gated on the bucketed tier
+- [x] A louder birth moment for a rarer drawing
+- [x] `FishAnatomyLandmarks`: the top-left to bottom-left **y flip**, in exactly one place, tested
+- [x] Eye highlights, from Python's landmark when present and from geometry otherwise
+- [x] The tail landmark resolved and carried, ready to pin the existing tail beat to
 
-Blocked on the reverse channel, [interaction_contract.md](interaction_contract.md) section 10.
-Do not build against `challenge_set` / `challenge_result` until the contract says they are live.
+Measured: a legendary drawing had a trail and glowed (sprite 1.68 against a 1.07 baseline) while every
+common one had neither.
 
----
+**Tail-bone deformation is not built.** The `anatomy` block is `null` on every payload today — Python
+phase 2, and the contract says it may stay null — so there is no way to see whether a deformation looks
+right, and guessing at it would be work to redo against the first real landmarks. The flip and the
+fallbacks it needs are done and tested, and the tail point is already resolved and carried, so this is
+a change in one place when the block ships. Noted in [tasks.md](tasks.md).
+
+## M10 — Drawing challenges — **blocked, deliberately not built** — *point 27*
+
+Section 10 of [interaction_contract.md](interaction_contract.md) lists `challenge_set` and
+`challenge_result` as **"reserved, not yet implemented"** and says in terms: *"Do not build against
+these yet."* The handoff brief repeats it. So nothing here is written, and no Unity-to-Python send path
+exists beyond the Socket.IO handshake.
+
+The names are claimed in the contract so neither side invents a conflicting one. When the contract says
+they are live, this is the milestone to pick up.
 
 ## Standing non-goals
 

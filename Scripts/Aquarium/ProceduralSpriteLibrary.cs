@@ -133,6 +133,81 @@ namespace ViitorCloud.FishAquarium.Aquarium {
             return Store(key, texture);
         }
 
+        /// <summary>
+        /// A translucent egg with a brighter nucleus. Tinted per renderer with the blend of its parents'
+        /// colours, and scaled up slightly as it ripens, so a clutch visibly develops rather than sitting
+        /// inert until it pops.
+        /// </summary>
+        public static Sprite GetEgg(int size) {
+            string key = "egg_" + size;
+
+            Sprite cached;
+            if (cache.TryGetValue(key, out cached) && cached != null) {
+                return cached;
+            }
+
+            Texture2D texture = CreateTexture(size, size, "AquariumEgg");
+            float half = size * 0.5f;
+
+            for (int y = 0; y < size; y++) {
+                for (int x = 0; x < size; x++) {
+                    float distance = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), new Vector2(half, half)) / half;
+
+                    // Soft translucent shell.
+                    float shell = (1f - SmoothThreshold(0.55f, 1f, distance)) * 0.55f;
+
+                    // Denser nucleus, so the egg reads as containing something.
+                    float nucleus = (1f - SmoothThreshold(0f, 0.4f, distance)) * 0.85f;
+
+                    texture.SetPixel(x, y, new Color(1f, 1f, 1f, Mathf.Clamp01(Mathf.Max(shell, nucleus))));
+                }
+            }
+
+            texture.Apply(false, false);
+            return Store(key, texture);
+        }
+
+        /// <summary>
+        /// Dark tapered silhouette for the predator. A body that swells about a third of the way along and
+        /// narrows to a forked tail - enough of a fish shape to read as a big one crossing the tank, with
+        /// no interior detail because it is meant to be a shadow rather than a creature.
+        ///
+        /// Pivoted at the centre and drawn nose-right, so the renderer can flip it by heading.
+        /// </summary>
+        public static Sprite GetPredatorSilhouette(int width, int height) {
+            string key = "predator_" + width + "x" + height;
+
+            Sprite cached;
+            if (cache.TryGetValue(key, out cached) && cached != null) {
+                return cached;
+            }
+
+            Texture2D texture = CreateTexture(width, height, "AquariumPredator");
+            float halfHeight = height * 0.5f;
+
+            for (int x = 0; x < width; x++) {
+                float along = (x + 0.5f) / width;
+
+                // Body: widest at a third along, tapering to a point at the nose and a thin peduncle
+                // before the tail. sin gives the swell without needing a curve asset.
+                float body = Mathf.Sin(Mathf.Pow(1f - along, 0.75f) * Mathf.PI) * 0.62f;
+
+                // Tail: flares back out over the last fifth.
+                float tail = along > 0.8f ? Mathf.InverseLerp(0.8f, 1f, along) * 0.85f : 0f;
+
+                float halfSpan = Mathf.Max(body, tail) * halfHeight;
+
+                for (int y = 0; y < height; y++) {
+                    float offset = Mathf.Abs((y + 0.5f) - halfHeight);
+                    float alpha = halfSpan <= 0.5f ? 0f : 1f - SmoothThreshold(halfSpan - 1.5f, halfSpan, offset);
+                    texture.SetPixel(x, y, new Color(1f, 1f, 1f, Mathf.Clamp01(alpha)));
+                }
+            }
+
+            texture.Apply(false, false);
+            return Store(key, texture);
+        }
+
         /// <summary> Tapered leaf with a rounded base and a pointed tip, pivoted at the bottom so it can sway from the root. </summary>
         public static Sprite GetLeaf(int width, int height) {
             string key = "leaf_" + width + "x" + height;

@@ -1,5 +1,7 @@
 using System;
 
+using UnityEngine;
+
 using ViitorCloud.FishAquarium.Fish;
 
 namespace ViitorCloud.FishAquarium.Network {
@@ -40,7 +42,90 @@ namespace ViitorCloud.FishAquarium.Network {
 
             return new FishTraits(message.id, personality.speed, personality.curiosity, personality.fear,
                 personality.social, personality.aggression, personality.grace, personality.preferred_depth,
-                personality.rarity_score, rarityTier, objectType, message.object_confidence, FishTraitSource.Payload);
+                personality.rarity_score, rarityTier, objectType, message.object_confidence, FishTraitSource.Payload,
+                ResolveDominantColour(message.features));
+        }
+
+        /// <summary>
+        /// The drawing's strongest colour, from features.dominant_colors[0]. White when the payload had no
+        /// features block, no colours, or an unparseable hex value.
+        ///
+        /// Python computed this from the segmentation mask, which is the whole point: Unity must not
+        /// average a flattened PNG to guess at it. Only used for presentation - a baby's tint.
+        /// </summary>
+        public static Color ResolveDominantColour(FishFeatures features) {
+            if (features == null || features.dominant_colors == null || features.dominant_colors.Length == 0) {
+                return Color.white;
+            }
+
+            // Descending by ratio per contract section 4, so the first entry is the strongest.
+            FishDominantColor strongest = features.dominant_colors[0];
+
+            Color parsed;
+            if (strongest == null || !TryParseHexColour(strongest.hex, out parsed)) {
+                return Color.white;
+            }
+
+            return parsed;
+        }
+
+        /// <summary>
+        /// Parses "#rrggbb" by hand rather than through ColorUtility.
+        ///
+        /// Trait resolution runs on a decode worker, and UnityEngine statics are not documented as
+        /// thread-safe. Six hex digits is arithmetic, so doing it here removes the question entirely.
+        /// </summary>
+        public static bool TryParseHexColour(string hex, out Color colour) {
+            colour = Color.white;
+
+            if (string.IsNullOrEmpty(hex)) {
+                return false;
+            }
+
+            int start = hex[0] == '#' ? 1 : 0;
+            if (hex.Length - start < 6) {
+                return false;
+            }
+
+            int red, green, blue;
+            if (!TryParseHexByte(hex, start, out red) ||
+                !TryParseHexByte(hex, start + 2, out green) ||
+                !TryParseHexByte(hex, start + 4, out blue)) {
+                return false;
+            }
+
+            colour = new Color(red / 255f, green / 255f, blue / 255f, 1f);
+            return true;
+        }
+
+        private static bool TryParseHexByte(string hex, int index, out int value) {
+            value = 0;
+
+            int high = HexDigit(hex[index]);
+            int low = HexDigit(hex[index + 1]);
+
+            if (high < 0 || low < 0) {
+                return false;
+            }
+
+            value = (high * 16) + low;
+            return true;
+        }
+
+        private static int HexDigit(char character) {
+            if (character >= '0' && character <= '9') {
+                return character - '0';
+            }
+
+            if (character >= 'a' && character <= 'f') {
+                return (character - 'a') + 10;
+            }
+
+            if (character >= 'A' && character <= 'F') {
+                return (character - 'A') + 10;
+            }
+
+            return -1;
         }
 
         /// <summary>

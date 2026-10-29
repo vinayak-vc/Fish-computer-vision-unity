@@ -1,5 +1,7 @@
 using UnityEngine;
 
+using ViitorCloud.FishAquarium.Core;
+
 namespace ViitorCloud.FishAquarium.Aquarium {
     /// <summary>
     /// Pooled bubbles. The pool is allocated once and every bubble is advanced in a single loop,
@@ -20,6 +22,10 @@ namespace ViitorCloud.FishAquarium.Aquarium {
         }
 
         [SerializeField] private Camera targetCamera;
+        [Tooltip("Optional. Supplies the tank's mood, which scales how many bubbles rise. Leave empty for a constant rate.")]
+        [SerializeField] private AquariumManager aquariumManager;
+        [Tooltip("How much faster bubbles arrive at full energy. 2 means a busy tank makes twice as many. Design point 11.")]
+        [SerializeField] private float energyDensityMultiplier = 2.2f;
         [Tooltip("Optional. When empty the pool is built from a generated bubble sprite.")]
         [SerializeField] private SpriteRenderer bubblePrefab;
         [SerializeField] private int poolSize = 40;
@@ -62,11 +68,29 @@ namespace ViitorCloud.FishAquarium.Aquarium {
 
             spawnTimer -= deltaTime;
             if (spawnTimer <= 0f) {
-                spawnTimer = spawnIntervalSeconds;
+                spawnTimer = ResolveSpawnInterval();
                 SpawnBubble();
             }
 
             AdvanceBubbles(deltaTime);
+        }
+
+        /// <summary>
+        /// Bubble rate from the tank's mood: a busy aquarium fizzes, an idle one barely does. One of the
+        /// three outputs of design point 11, and the cheapest to read at a glance.
+        /// </summary>
+        private float ResolveSpawnInterval() {
+            if (aquariumManager == null || aquariumManager.Energy == null) {
+                return spawnIntervalSeconds;
+            }
+
+            AquariumConfig config = aquariumManager.Config;
+            if (config == null || !config.AquariumEnergyEnabled) {
+                return spawnIntervalSeconds;
+            }
+
+            float density = Mathf.Lerp(1f, Mathf.Max(1f, energyDensityMultiplier), aquariumManager.Energy.Current);
+            return spawnIntervalSeconds / density;
         }
 
         private void ResolveCamera() {

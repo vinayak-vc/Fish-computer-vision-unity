@@ -68,51 +68,71 @@ Live task list. Completed work is kept, briefly, so the next agent can see what 
       you can judge by watching a tank.
 - [x] Verified: 235 edit-mode tests pass; crowd and competition measured in play mode.
 
-## Next — M5, persistence
+## Done — M5, persistence
 
-Design points 24, 28, 29. Unity owns all runtime state; Python owns only the artwork and the birth
-certificate. Save to `Application.persistentDataPath`.
+- [x] `AquariumPersistenceService`, `AquariumSaveState`, `FishArtworkCache`, `CaptureCalendar`.
+- [x] The registry question from the old plan is answered: `FishCaptureRegistry` is now bounded and its
+      ids are saved and seeded back into both ingest services. Verified by restart — see the roadmap.
+- [x] `FishMovement.RestoreAffection` written, and now has the caller it was waiting for.
+- [x] Birth moment on live arrival, never on a replay or a restore.
 
-**Acceptance:** the tank comes back exactly as it was after a full machine restart, with Python off.
+## Done — M6, world systems
 
-1. **Decide the capture-registry question first.** It is the one part with a real design choice in it.
-   `FishPayloadDecodeQueue` holds a `FishCaptureRegistry` for the session only. If it stays that way, a
-   restarted Unity will restore its fish from disk *and then* re-admit every id in Python's replay
-   window as a brand new arrival — duplicating the tank on every restart, which is exactly the failure
-   M0 exists to prevent. The registry has to be persisted alongside the fish, or keyed off what was
-   restored.
-2. **Cache the decoded PNG locally.** Contract section 8's replay window is ten captures; anything
-   older is gone. Without a local cache, a tank of fifty fish cannot come back.
-3. **Persist per fish:** id, traits, position, `Affection`, `AgeSeconds`, `FoodEaten`, and later
-   relationships. `FishMovement.Affection` and `FishController.AgeSeconds` are already live values with
-   no way to restore them; a `RestoreAffection` setter was deliberately left unwritten rather than
-   shipped unused, and this is where it lands.
-4. **Restore silently.** A restored fish is exactly the replay case that already exists: no birth
-   animation, and no novelty, or a restart will have the whole tank swarm the fish it just reloaded.
-5. **Then the birth moment and the "created today" counter,** driven by `sequence` and `timestamp`.
+- [x] `AquariumEnergy`, `AquariumFlow`, `AquariumCycle`, `AquariumPredator`, `PredatorRenderer`.
+- [x] Energy wired into fish speed, bubble density and the water's tint.
+- [x] Departing fish swim off sideways as they fade.
 
-M5 has one piece of groundwork already waiting for it: `FishMovement.Affection` is a live per-fish
-value with no way to restore a saved one. A `RestoreAffection` setter was deliberately left out rather
-than shipped unused, and is the first thing M5 will want.
+## Done — M7, social bonds
 
-M5 also needs a decision on where the capture registry lives. Today `FishPayloadDecodeQueue` owns one
-for the session; persistence means the registry has to survive a restart, or a restarted Unity will
-re-admit every fish in Python's replay window as a brand new arrival on top of the ones it restored
-from disk.
+- [x] `FishBondRegistry`, `EggField`, `EggRenderer`, `FishTraitBlend`, `FishFactory.CreateBaby`.
+
+## Done — M8, non-fish drawings
+
+- [x] `FishBehaviourProfile` and the movement branches for anchored, pulsing and predatory types.
+
+## Done — M9, rarity and anatomy
+
+- [x] `FishRarityProfile`, `FishAnatomyLandmarks`, eye highlights, glow, trails, louder births.
 
 ---
+
+## What is left
+
+Four things, all deliberate, none of them blocking an installation.
+
+1. **M10, drawing challenges.** Blocked by the contract itself, which says in terms not to build
+   against `challenge_set` / `challenge_result` yet. Do not start until section 10 says they are live.
+2. **Tail-bone deformation, M9.** Waits on Python's `anatomy` block, which is `null` on every payload
+   today. The flip, the fallbacks and the resolved tail point are all in place, so this is a change in
+   one place. See [decisions.md](decisions.md) D-010.
+3. **The microphone, M6.** The brief marks it optional and it needs nothing from Python: Unity's
+   `Microphone` API, RMS into `AquariumEnergy` — which already takes an arbitrary 0..1 stimulus, so
+   this is a second caller of `Tick`, not a new system — plus an onset detector for a clap that could
+   call `AquariumPredator.Appear` or emit a ripple at the tank's centre.
+4. **A player-build frame check at 200 fish.** The flocking pass is measured at 0.671 ms, but the
+   editor caps itself at 60 fps with vSync so total headroom could not be measured. Confirm in a build
+   before an installation runs with `maxFishCount` raised.
+
+## Also worth knowing
+
+- **`MaxFishCount` is still 30.** Everything scales to 200; how full the tank should be is an
+  installation decision, not one to make from here.
+- **Babies do not survive a restart**, by design. [decisions.md](decisions.md) D-009.
+- **A restored fish's position comes back exactly**, but it then swims off immediately, so watching the
+  tank a few seconds after a restart will not look identical. The save is faithful; fish are not static.
 
 ## Carried over, not blocking
 
 - **`AquariumConfig.asset` has never been re-serialised.** Every field added since it was authored -
-  the whole socket block, and now the whole trait, depth and pointer blocks - lives only as a C# field
+  the socket block, and every block added since - trait response, depth, pointer, feeding,
+  energy, currents, weather, predator, persistence, bonds, object types and rarity - lives only as a
+  C# field
   initialiser. Verified working, because Unity runs initialisers before applying serialised data. It
   does mean a default changed in code silently changes the installation's behaviour, which is worth
   knowing before someone edits one.
 - **The mock publisher** the handoff brief mentions still does not exist on the Python side. Until it
   does, `SocketPayloadSelfTest` (F5 live, F6 replay burst, F7 legacy) is the way to get a spread of
   personalities into the tank without a camera.
-- **Anatomy is parsed but unused.** The top-left to bottom-left y flip is not written. See M9.
 - **`Assets/StreamingAssets/Sample/` is empty.** `SocketPayloadSelfTest` needs at least one PNG there
   or F5, F6 and F7 log "the sample folder contains no PNGs" and do nothing. Predates this session;
   any transparent PNG will do.

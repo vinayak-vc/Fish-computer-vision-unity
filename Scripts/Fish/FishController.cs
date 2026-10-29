@@ -27,6 +27,13 @@ namespace ViitorCloud.FishAquarium.Fish {
         private float ageSeconds;
         private int foodEaten;
         private float eatCooldownRemaining;
+        private float birthMomentRemaining;
+        private bool birthGlowActive;
+        private Color spriteTint = Color.white;
+        private SpriteRenderer eyeRenderer;
+        private TrailRenderer trail;
+        private float rarityGlow;
+        private float birthLoudness = 1f;
         private bool suppressNovelty;
         private bool initialised;
 
@@ -72,6 +79,95 @@ namespace ViitorCloud.FishAquarium.Fish {
         /// </summary>
         public bool CanEat {
             get { return eatCooldownRemaining <= 0f; }
+        }
+
+        /// <summary>
+        /// True while this fish is still having its arrival celebrated. Design point 28's birth moment;
+        /// M9 makes it louder for a rare drawing.
+        /// </summary>
+        public bool IsCelebratingBirth {
+            get { return birthMomentRemaining > 0f; }
+        }
+
+        /// <summary>
+        /// Puts back the life this fish had before the last restart: where it was, how much it trusts the
+        /// visitor, how old it is and how well it has eaten.
+        ///
+        /// Called immediately after the factory has built the fish, and only for a restore. Everything
+        /// here is state the aquarium owns under contract section 1 - Python holds none of it.
+        /// </summary>
+        public void RestoreState(Vector2 position, float affection, float ageSecondsSoFar, int foodEatenSoFar) {
+            if (cachedTransform == null) {
+                cachedTransform = transform;
+            }
+
+            cachedTransform.position = new Vector3(position.x, position.y, cachedTransform.position.z);
+
+            if (movement != null) {
+                movement.RestoreAffection(affection);
+                movement.PickNewTarget();
+            }
+
+            ageSeconds = Mathf.Max(0f, ageSecondsSoFar);
+            foodEaten = Mathf.Max(0, foodEatenSoFar);
+
+            // A restored fish is not a new arrival: no celebration, and nothing for the shoal to swarm.
+            birthMomentRemaining = 0f;
+            birthGlowActive = false;
+            suppressNovelty = true;
+        }
+
+        /// <summary>
+        /// Tints this fish's sprite. Used for a baby, which wears a parent's drawing under a blend of both
+        /// parents' colours - design point 5's "colour blended from the parents".
+        ///
+        /// Held as a field rather than written straight to the renderer, because the spawn, removal and
+        /// birth-glow animations all rewrite the colour every frame and would otherwise wipe it out.
+        /// </summary>
+        public void ApplyTint(Color tint) {
+            spriteTint = tint;
+            ApplyVisualState(State == FishLifecycleState.Spawning ? 0f : 1f);
+        }
+
+        /// <summary>
+        /// Places the eye highlight. Design point 26, and the reason FishAnatomyLandmarks exists.
+        ///
+        /// uv is a sprite UV with the y already flipped out of Python's top-left convention, so nothing
+        /// here re-flips it. The highlight is parented to the visual root, which the sprite mirrors, so
+        /// the eye stays on the fish's head whichever way it is swimming.
+        /// </summary>
+        public void ApplyEyeMarker(Vector2 uv, float radius) {
+            if (config == null || !config.EyeHighlightEnabled || spriteRenderer == null || spriteRenderer.sprite == null) {
+                return;
+            }
+
+            if (eyeRenderer == null) {
+                eyeRenderer = BuildEyeRenderer();
+            }
+
+            if (eyeRenderer == null) {
+                return;
+            }
+
+            Bounds bounds = spriteRenderer.sprite.bounds;
+
+            // UV to sprite-local: 0..1 across the sprite's own extent, centred on its pivot.
+            Vector3 local = new Vector3(
+                bounds.min.x + (bounds.size.x * Mathf.Clamp01(uv.x)),
+                bounds.min.y + (bounds.size.y * Mathf.Clamp01(uv.y)),
+                0f);
+
+            eyeRenderer.transform.localPosition = local;
+
+            float longestSide = Mathf.Max(bounds.size.x, bounds.size.y);
+            float diameter = Mathf.Max(0.001f, radius * 2f * longestSide * config.EyeHighlightScale);
+            float spriteHeight = eyeRenderer.sprite != null ? eyeRenderer.sprite.bounds.size.y : 1f;
+            float scale = spriteHeight > Mathf.Epsilon ? diameter / spriteHeight : 1f;
+
+            eyeRenderer.transform.localScale = new Vector3(scale, scale, 1f);
+            eyeRenderer.color = config.EyeHighlightColour;
+            eyeRenderer.sortingOrder = spriteRenderer.sortingOrder + 1;
+            eyeRenderer.gameObject.SetActive(true);
         }
 
         /// <summary> Called by AquariumManager when this fish wins a flake. Starts its chewing cooldown. </summary>
@@ -139,6 +235,13 @@ namespace ViitorCloud.FishAquarium.Fish {
             ageSeconds = 0f;
             eatCooldownRemaining = 0f;
 
+            // Live arrivals get a moment; replays and restores are the aquarium putting fish back, not
+            // announcing them, so they get none.
+            ResolveRarityEffects();
+
+            // Design point 7: rarity gates a louder birth moment, in both length and brightness.
+            birthMomentRemaining = skipEntranceAnimation ? 0f : config.BirthMomentSeconds * birthLoudness;
+
             // A replay is a restoration, not an arrival, so it neither celebrates nor draws a crowd.
             suppressNovelty = skipEntranceAnimation;
 
@@ -181,6 +284,10 @@ namespace ViitorCloud.FishAquarium.Fish {
                 eatCooldownRemaining -= deltaTime;
             }
 
+            if (birthMomentRemaining > 0f) {
+                birthMomentRemaining -= deltaTime;
+            }
+
             switch (State) {
                 case FishLifecycleState.Spawning:
                     TickSpawning(deltaTime);
@@ -194,6 +301,35 @@ namespace ViitorCloud.FishAquarium.Fish {
                 case FishLifecycleState.Removing:
                     TickRemoving(deltaTime);
                     break;
+            }
+
+            RefreshBirthGlow();
+        }
+
+        /// <summary>
+        /// Fades the birth glow out over its window.
+        ///
+        /// Driven from here because the glow outlives the spawn animation - a 1.4 second moment against a
+        /// 0.7 second entrance - and neither Entering nor Swimming refresh the sprite colour on their own.
+        /// Without this the fish would keep whatever brightness it had at the instant it started swimming
+        /// and stay lit for the rest of its life.
+        ///
+        /// The flag exists so the reset back to normal happens exactly once rather than every frame.
+        /// </summary>
+        private void RefreshBirthGlow() {
+            if (State != FishLifecycleState.Entering && State != FishLifecycleState.Swimming) {
+                return;
+            }
+
+            if (birthMomentRemaining > 0f) {
+                birthGlowActive = true;
+                ApplyVisualState(1f);
+                return;
+            }
+
+            if (birthGlowActive) {
+                birthGlowActive = false;
+                ApplyVisualState(1f);
             }
         }
 
@@ -250,11 +386,106 @@ namespace ViitorCloud.FishAquarium.Fish {
 
             cachedTransform.localScale = new Vector3(finalScale, finalScale, 1f);
 
-            if (spriteRenderer != null) {
-                Color colour = spriteRenderer.color;
-                colour.a = depthAlpha * eased;
-                spriteRenderer.color = colour;
+            if (spriteRenderer == null) {
+                return;
             }
+
+            // The birth moment: a fish that has just been drawn glows, fading back to normal over the
+            // window. Multiplying the colour rather than adding an object keeps it free - no extra
+            // renderer, no particle system, nothing to pool - and it reads clearly against the water.
+            float brightness = EvaluateBirthBrightness();
+
+            // A jellyfish glows as it pulses. Only a confidently classified one: contract section 5 asks
+            // for type-specific effects to be skipped when the classifier was guessing.
+            if (movement != null) {
+                brightness += movement.EvaluateTypeGlow();
+            }
+
+            // A rare drawing glows steadily. Design point 7.
+            brightness += rarityGlow;
+
+            Color colour = new Color(spriteTint.r * brightness, spriteTint.g * brightness, spriteTint.b * brightness, depthAlpha * eased);
+            spriteRenderer.color = colour;
+        }
+
+        private float EvaluateBirthBrightness() {
+            if (birthMomentRemaining <= 0f || config.BirthMomentSeconds <= 0f) {
+                return 1f;
+            }
+
+            float window = config.BirthMomentSeconds * birthLoudness;
+            float remaining = Mathf.Clamp01(birthMomentRemaining / Mathf.Max(0.0001f, window));
+            return Mathf.Lerp(1f, config.BirthMomentBrightness * birthLoudness, remaining);
+        }
+
+        /// <summary>
+        /// Works out what this drawing's rarity earns it: a steady glow, a trail, and a louder arrival.
+        /// Design point 7.
+        /// </summary>
+        private void ResolveRarityEffects() {
+            rarityGlow = 0f;
+            birthLoudness = 1f;
+
+            if (!config.RarityEffectsEnabled || Data == null || Data.Traits == null) {
+                return;
+            }
+
+            rarityGlow = FishRarityProfile.EvaluateGlow(Data.Traits.RarityScore, config.RarityGlowResponse, config.RarityMaximumGlow);
+            birthLoudness = FishRarityProfile.EvaluateBirthLoudness(Data.Traits.RarityTier, config.RarityBirthLoudness);
+
+            if (FishRarityProfile.HasTrail(Data.Traits.RarityTier, config.MinimumTrailTier)) {
+                BuildTrail();
+            }
+        }
+
+        /// <summary>
+        /// A trail for a rare drawing, using Unity's own TrailRenderer.
+        ///
+        /// Built rather than pooled because it is rare by construction - only drawings at or above the
+        /// configured tier get one, which on a common-heavy tank is a handful at most.
+        /// </summary>
+        private void BuildTrail() {
+            if (trail != null) {
+                return;
+            }
+
+            Transform host = visualRoot != null ? visualRoot : cachedTransform;
+
+            trail = host.gameObject.GetComponent<TrailRenderer>();
+            if (trail == null) {
+                trail = host.gameObject.AddComponent<TrailRenderer>();
+            }
+
+            trail.time = config.RarityTrailSeconds;
+            trail.startWidth = config.RarityTrailStartWidth * baseScale;
+            trail.endWidth = 0f;
+            trail.numCapVertices = 4;
+            trail.alignment = LineAlignment.View;
+            trail.sortingOrder = spriteRenderer != null ? spriteRenderer.sortingOrder - 1 : 0;
+            trail.material = new Material(Shader.Find("Sprites/Default"));
+
+            Color tail = Data.Traits.DominantColour;
+            tail.a = 0.5f;
+            trail.startColor = tail;
+
+            Color faded = tail;
+            faded.a = 0f;
+            trail.endColor = faded;
+        }
+
+        private SpriteRenderer BuildEyeRenderer() {
+            Transform host = visualRoot != null ? visualRoot : cachedTransform;
+            if (host == null) {
+                return null;
+            }
+
+            GameObject eye = new GameObject("EyeHighlight");
+            eye.transform.SetParent(host, false);
+
+            SpriteRenderer renderer = eye.AddComponent<SpriteRenderer>();
+            renderer.sprite = ViitorCloud.FishAquarium.Aquarium.ProceduralSpriteLibrary.GetPellet(16);
+            eye.SetActive(false);
+            return renderer;
         }
 
         private void ResolveComponentReferences() {

@@ -74,6 +74,20 @@ namespace ViitorCloud.FishAquarium.Input {
             }
         }
 
+        /// <summary>
+        /// Marks a path as already ingested without queueing it. Used at startup to seed the paths
+        /// restored from the save file, so a rescan does not spawn a second copy of every fish.
+        /// </summary>
+        public void MarkKnown(string absolutePath) {
+            if (string.IsNullOrWhiteSpace(absolutePath)) {
+                return;
+            }
+
+            lock (syncRoot) {
+                knownPaths.Add(PathUtility.Normalize(absolutePath));
+            }
+        }
+
         public bool HasSeen(string absolutePath) {
             if (string.IsNullOrWhiteSpace(absolutePath)) {
                 return false;

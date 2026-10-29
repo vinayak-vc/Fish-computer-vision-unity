@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace ViitorCloud.FishAquarium.Core {
     /// <summary>
     /// Read-only status plus the few operations the debug overlay needs from the file ingest pipeline.
@@ -34,5 +36,15 @@ namespace ViitorCloud.FishAquarium.Core {
 
         /// <summary> Spawns one fish from the development sample folder without touching the input folder. </summary>
         bool SpawnTestFish();
+
+        /// <summary>
+        /// Marks these sources as already ingested, without spawning anything.
+        ///
+        /// Called once at startup with the ids restored from disk. Without it a restarted aquarium loads
+        /// its fish from the save file and then treats the same drawings arriving from Python - or found
+        /// again in the watched folder - as brand new, duplicating the whole tank on every restart. That
+        /// is the exact failure section 8 of the contract, and milestone M0, exist to prevent.
+        /// </summary>
+        void SeedKnownCaptures(IList<string> captureIds);
     }
 }

@@ -10,13 +10,25 @@ Scripts/
   Core/        configuration, app lifecycle, the population manager, shared value types
   Network/     Socket.IO transport, wire types, the off-thread decode queue
   Input/       folder-watching ingest, and the pointer abstraction
-  Fish/        one creature: data, traits, steering, movement, animation, texture lifetime
-  Aquarium/    the world: bounds, background, decor, bubbles, water
+  Fish/        one creature: data, traits, steering, movement, animation, texture lifetime,
+               artwork cache, social bonds, eggs, behaviour and rarity profiles
+  Aquarium/    the world: bounds, background, decor, bubbles, water, food, currents,
+               weather, the predator, and the renderers for each
   Debug/       development-only overlay and self-tests
 ```
 
-Dependencies point inwards: `Aquarium` and `Fish` know `Core`; `Network` and `Input` know `Core`
-and `Fish`; nothing in `Core` knows about the socket.
+The dependency rule that matters is the one about the socket: **nothing in `Core` knows the socket
+exists.** `Network` and `Input` know `Core` and `Fish`; `Core` reaches an ingest source only through
+`IFishIngestService`, which is why persistence can seed capture ids without importing the transport.
+
+`Core` and `Fish` do reference each other - `AquariumManager` drives `FishController`, and
+`FishController` reads `AquariumBounds`. That is deliberate: the manager is the hub every fish talks
+to, and splitting it would mean an interface per direction for no gain inside a single assembly.
+
+Two placement rules worth knowing, both learned the hard way this session. A type that consumes wire
+types belongs in `Network` (so `FishTraitResolver` and `FishAnatomyLandmarks` live there). A type that
+needs `FishTraits` belongs in `Fish`, not `Aquarium` - which is why `EggField` sits beside `FoodField`'s
+sibling rather than next to it.
 
 ## The ingest pipeline
 
@@ -86,7 +98,10 @@ within an authored range:
 | `preferred_depth` | vertical home band, and how hard the fish holds it |
 | `curiosity` vs `fear` | pointer attraction against repulsion |
 | `fear` | startle threshold against pointer speed |
-| `rarity_score` / `rarity_tier` | reserved for glow, trails, birth fanfare (M9) |
+| `aggression` | who wins a flake, and the cadence between mouthfuls |
+| `social` | boid alignment and cohesion weight |
+| `rarity_score` | steady glow |
+| `rarity_tier` | trails, and how loud the birth moment is |
 
 `preferred_depth` is a **vertical** home band, 0 at the surface and 1 at the floor. It is not the
 same axis as `FishData.Depth`, which is **parallax** — how far into the scene a fish is drawn, and
@@ -194,6 +209,94 @@ could never change how fish behave.
 `AquariumBounds` is the logical swimming area in world units. Nothing in the fish code reads screen
 pixels, so every aspect ratio and a mid-session window resize all behave identically; a resize
 raises `BoundsChanged` and every fish re-aims.
+
+## Persistence
+
+```
+AquariumPersistenceService
+  |- Start  --> Load: read aquarium_state.json, seed capture ids, rebuild fish
+  |- Update --> Save every saveIntervalSeconds
+  +- OnApplicationQuit --> Save
+
+persistentDataPath/
+  |- aquarium_state.json     roster, known capture ids, the created-today tally
+  +- artwork/<id>.png        FishArtworkCache: one file per drawing
+```
+
+Three things have to be saved together, and leaving any one out produces a different visible failure:
+the **roster** (or fish come back as strangers), the **artwork** (or nothing older than Python's
+ten-capture replay window can come back at all), and the **capture ids** (or the aquarium restores its
+fish and then admits Python's replay burst as new arrivals, duplicating the tank on every restart).
+
+Both writes are atomic - temporary file, then move - because an installation loses power mid-write
+sooner or later, and a half-written save that parses to nothing would lose everything.
+
+`FishCaptureRegistry` is bounded rather than unbounded, which is what makes saving it viable. Eviction
+is safe because Python only ever replays its most recent captures; anything evicted is far older than
+that. Babies are never saved - see [decisions.md](decisions.md) D-009.
+
+## World systems
+
+```
+AquariumManager.Update
+  +- TickWorldSystems      before any fish reads them, so the whole tank agrees
+       |- AquariumCycle    time of day, scheduled storms
+       |- AquariumPredator rare crossing, threat ramping in and out
+       +- AquariumEnergy   one 0..1 mood from pointer speed and arriving drawings
+
+read by: FishMovement (speed, current, panic), BubbleSystem (density), AquariumBackground (tint)
+```
+
+`AquariumEnergy` is deliberately one number. Design point 11 asks for speed, bubbles, lighting and
+particle count to move together, and a single mood is what makes the aquarium swell and settle as one
+thing rather than as four unrelated effects.
+
+`AquariumFlow` is a pure function of position and time with no state at all, so every fish samples the
+current without anyone owning a grid, nothing is rebuilt per frame, and a current can never be the
+reason two runs of the same drawing diverge.
+
+## Social bonds
+
+```
+AquariumManager.TickSocialBonds        after the fish have moved
+  |- AccrueFamiliarity --> FishBondRegistry.RecordProximity   nearest neighbour only
+  |- FishBondRegistry.Tick -----------> pairs ready to lay
+  |- TryLayEgg -----> FishTraitBlend -> EggField.TryLay
+  +- HatchEggs -----> FishFactory.CreateBaby
+```
+
+Company is credited for **nearest neighbours only**. A fish in the middle of a school is not keeping
+company with all six of its neighbours, and crediting every pair in a crowd would pair the whole tank
+within a minute of the first school forming.
+
+An egg carries the blended traits rather than looking its parents up at hatching time, so a brood is
+never orphaned by a parent being removed to make room.
+
+## Object types
+
+`FishBehaviourProfile` maps each `object_type` to flags - anchors, swims, flocks, pulses, sways,
+predator-eligible - rather than to a subclass. Every type shares the movement code and differs only in
+which parts apply.
+
+The rule underneath every branch is the contract's own: **a misclassification must be survivable,
+never fatal.** An unrecognised type behaves as a fish, a plant that was really a fish sits on the floor
+and sways, and nothing here can reject a drawing. `object_confidence` below 0.5 keeps the behaviour and
+skips the decorative effect, so a wrong guess costs a glow rather than a creature.
+
+## Rarity and anatomy
+
+Both of the contract's rarity values are used, for different things: the continuous `rarity_score`
+drives the glow so brightness rises smoothly, and the pre-bucketed `rarity_tier` gates the trail so the
+score thresholds stay in Python's hands.
+
+`FishAnatomyLandmarks` holds the **top-left to bottom-left y flip** in exactly one function. That is
+the whole reason the class exists: the contract warns twice that getting it wrong puts every eye on the
+fish's belly and looks like a detection failure rather than a coordinate bug - so it gets investigated
+in Python, where nothing is wrong.
+
+The geometric fallback is not an edge case. `anatomy` is null on every payload today and may stay null,
+so the fallback is the path that actually runs, and it has to look acceptable rather than merely not
+crash.
 
 ## Texture lifetime
 

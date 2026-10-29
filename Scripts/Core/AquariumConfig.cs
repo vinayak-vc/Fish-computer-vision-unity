@@ -2,6 +2,8 @@ using System.IO;
 
 using UnityEngine;
 
+using ViitorCloud.FishAquarium.Fish;
+
 namespace ViitorCloud.FishAquarium.Core {
     /// <summary> Single source of truth for every tunable value in the aquarium. Created via Assets > Create > Fish Aquarium > Aquarium Config. </summary>
     [CreateAssetMenu(fileName = "AquariumConfig", menuName = "Fish Aquarium/Aquarium Config", order = 0)]
@@ -238,6 +240,152 @@ namespace ViitorCloud.FishAquarium.Core {
         [SerializeField] private Color foodColour = new Color(0.72f, 0.46f, 0.22f, 1f);
         [SerializeField] private float foodWorldSize = 0.14f;
         [SerializeField] private int foodSortingOrder = 210;
+
+        [Header("Rarity And Anatomy")]
+        [Tooltip("Design points 7 and 26. A rare drawing glows, trails and is announced more loudly; eye highlights are pinned to Python's landmarks when it sends them.")]
+        [SerializeField] private bool rarityEffectsEnabled = true;
+        [Tooltip("Rarity score to glow. Ordinary drawings should get nothing: if everything glows, nothing looks rare.")]
+        [SerializeField] private AnimationCurve rarityGlowResponse = AnimationCurve.Linear(0f, 0f, 1f, 1f);
+        [SerializeField] private float rarityMaximumGlow = 0.7f;
+        [Tooltip("Lowest tier that trails. Gated on the tier so the score thresholds stay in Python's hands.")]
+        [SerializeField] private FishRarityTier minimumTrailTier = FishRarityTier.Rare;
+        [SerializeField] private float rarityTrailSeconds = 0.55f;
+        [SerializeField] private float rarityTrailStartWidth = 0.35f;
+        [Tooltip("How much louder a legendary drawing's birth moment is than a common one's, in both length and brightness.")]
+        [SerializeField] private float rarityBirthLoudness = 2.2f;
+
+        [Header("Eye Highlight")]
+        [Tooltip("Draw a highlight on the eye. Uses Python's anatomy landmark when it sends one and a geometric fallback otherwise - which today is always, since the anatomy block is null until Python phase 2.")]
+        [SerializeField] private bool eyeHighlightEnabled = true;
+        [Tooltip("Eye size as a fraction of the fish's longest side, when the landmark carries no radius.")]
+        [SerializeField] private float eyeHighlightScale = 0.9f;
+        [SerializeField] private Color eyeHighlightColour = new Color(0.05f, 0.06f, 0.09f, 0.85f);
+
+        [Header("Non-Fish Drawings")]
+        [Tooltip("Design points 21 and 22, contract section 5. Plants and rocks anchor to the floor, jellyfish drift and pulse and ignore flocking, creatures may be predators. A misclassification must be survivable, never fatal.")]
+        [SerializeField] private bool objectTypeBehavioursEnabled = true;
+        [Tooltip("How far a plant leans, in degrees, and how fast. Rocks do not move at all.")]
+        [SerializeField] private float plantSwayDegrees = 9f;
+        [SerializeField] private float plantSwaySpeed = 0.5f;
+        [Tooltip("World units a jellyfish rises and falls as it pulses.")]
+        [SerializeField] private float jellyfishPulseAmplitude = 0.55f;
+        [SerializeField] private float jellyfishPulseSpeed = 0.6f;
+        [Tooltip("Fraction of its normal speed a jellyfish drifts at. It is a drifter, not a swimmer.")]
+        [Range(0.05f, 1f)]
+        [SerializeField] private float jellyfishDriftFactor = 0.35f;
+        [Tooltip("How much a jellyfish brightens and dims as it pulses. This is the type-specific effect that a low-confidence classification skips.")]
+        [SerializeField] private float jellyfishGlowAmount = 0.35f;
+        [Tooltip("Aggression a creature needs before other fish treat it as a predator. Below this it is just an odd-looking fish.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float creaturePredatorAggressionThreshold = 0.6f;
+        [Tooltip("How far a predatory creature frightens other fish. Much smaller than the procedural predator's reach: this is a bully, not an event.")]
+        [SerializeField] private float creatureFearRadius = 3.2f;
+        [SerializeField] private float creatureFleeStrength = 2.6f;
+
+        [Header("Social Bonds")]
+        [Tooltip("Design points 5 and 8. Fish that keep each other company form a pair, a pair produces an egg, and the egg hatches a baby whose looks and personality come from both parents.")]
+        [SerializeField] private bool socialBondsEnabled = true;
+        [Tooltip("How close two fish must be to count as keeping company.")]
+        [SerializeField] private float bondRadius = 1.8f;
+        [Tooltip("Seconds of company before a pair forms. Both fish choosing each other accrues this twice as fast as one following the other around.")]
+        [SerializeField] private float secondsTogetherToPair = 14f;
+        [Tooltip("How fast familiarity fades when two fish are apart. This is what makes the requirement SUSTAINED company rather than cumulative.")]
+        [SerializeField] private float familiarityDecayPerSecond = 0.6f;
+        [Tooltip("Seconds a formed pair takes to produce an egg.")]
+        [SerializeField] private float secondsPerBrood = 30f;
+        [SerializeField] private int maxEggs = 8;
+        [SerializeField] private float eggIncubationSeconds = 12f;
+        [Tooltip("How far a baby's traits may wander from the midpoint of its parents'. Zero would make every baby of one pair identical and flatten the tank over an evening.")]
+        [Range(0f, 0.5f)]
+        [SerializeField] private float broodTraitJitter = 0.12f;
+        [Tooltip("How much smaller a baby is than the average of its parents.")]
+        [Range(0.05f, 1f)]
+        [SerializeField] private float babyScaleFactor = 0.45f;
+
+        [Header("Egg Appearance")]
+        [SerializeField] private float eggWorldSize = 0.22f;
+        [SerializeField] private int eggSortingOrder = 205;
+
+        [Header("Aquarium Energy")]
+        [Tooltip("Design point 11. One 0..1 value describing how alive the tank feels, driving fish speed, bubble density and the water's brightness together, so the whole aquarium swells and settles as one mood.")]
+        [SerializeField] private bool aquariumEnergyEnabled = true;
+        [Tooltip("Where the mood sits with nobody there. Not zero: an empty tank should still be alive.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float energyRestingLevel = 0.35f;
+        [Tooltip("Pointer speed, in world units per second, that counts as full excitement.")]
+        [SerializeField] private float energyPointerSpeedForFull = 6f;
+        [Tooltip("How fast the tank wakes up. Deliberately faster than it settles.")]
+        [SerializeField] private float energyRisePerSecond = 0.8f;
+        [Tooltip("How fast it calms down again. Slow, so a tank does not visibly deflate the moment somebody steps away.")]
+        [SerializeField] private float energyDecayPerSecond = 0.12f;
+        [Tooltip("Immediate lift from one drawing arriving. A capture is an event with no duration, so it bumps the mood rather than holding it up.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float energyPerCapture = 0.25f;
+        [Tooltip("Extra fish speed at full energy. 0.3 means a busy tank swims 30 percent faster.")]
+        [SerializeField] private float energySpeedInfluence = 0.3f;
+
+        [Header("Currents")]
+        [Tooltip("Design points 17 and 18. Slow eddies plus a prevailing drift that carries the shoal from one end of the tank to the other over minutes.")]
+        [SerializeField] private bool currentsEnabled = true;
+        [Tooltip("World-unit size of one eddy. Larger is broader and slower.")]
+        [SerializeField] private float currentScale = 7f;
+        [SerializeField] private float currentStrength = 0.55f;
+        [Tooltip("Seconds for the prevailing drift to turn right around. Minutes, so it reads as migration rather than as wind.")]
+        [SerializeField] private float migrationPeriodSeconds = 150f;
+        [SerializeField] private float migrationStrength = 0.4f;
+        [Tooltip("Extra choppiness at the height of a storm, on top of the ordinary current.")]
+        [SerializeField] private float stormTurbulence = 1.3f;
+
+        [Header("Day And Night")]
+        [Tooltip("Design points 14 and 15. Seconds for a full day. Compressed hard on purpose: a real day would be indistinguishable from a static scene over the two minutes this milestone is judged on.")]
+        [SerializeField] private float dayLengthSeconds = 300f;
+        [Tooltip("How much darker the tank gets at midnight. 0 disables the cycle's colour without disabling its timing.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float nightDarkening = 0.55f;
+        [SerializeField] private float stormIntervalSeconds = 110f;
+        [SerializeField] private float stormDurationSeconds = 22f;
+        [Tooltip("Seconds a storm takes to build and to clear, so nothing snaps.")]
+        [SerializeField] private float stormRampSeconds = 5f;
+        [Tooltip("Colour the water is tinted towards at the height of a storm.")]
+        [SerializeField] private Color stormWaterTint = new Color(0.42f, 0.5f, 0.58f, 1f);
+
+        [Header("Predator")]
+        [Tooltip("Design point 20. A generated shape - never a visitor's drawing - that crosses the tank now and then and scatters everything.")]
+        [SerializeField] private bool predatorEnabled = true;
+        [Tooltip("Seconds between visits. Minutes on purpose: a threat that arrives often stops being a threat.")]
+        [SerializeField] private float predatorIntervalSeconds = 165f;
+        [SerializeField] private float predatorCrossingSeconds = 11f;
+        [Tooltip("Seconds it takes to become frightening and to stop being so, so the scatter builds rather than snapping.")]
+        [SerializeField] private float predatorFadeSeconds = 2.5f;
+        [Tooltip("How far away fish notice it. Much larger than the pointer radius: the whole tank should react.")]
+        [SerializeField] private float predatorFearRadius = 9f;
+        [SerializeField] private float predatorFleeStrength = 7f;
+        [Tooltip("Speed multiplier for a fish fleeing a predator, at full threat.")]
+        [SerializeField] private float predatorPanicSpeedMultiplier = 2.4f;
+        [SerializeField] private float predatorWorldLength = 3.4f;
+        [SerializeField] private Color predatorColour = new Color(0.09f, 0.11f, 0.15f, 0.92f);
+        [SerializeField] private int predatorSortingOrder = 240;
+
+        [Header("Lifecycle")]
+        [Tooltip("Design point 25. A fish being removed to make room swims off towards the nearest edge as it fades, instead of dissolving where it floats.")]
+        [SerializeField] private bool departingFishSwimAway = true;
+        [SerializeField] private float departureSwimStrength = 3.2f;
+
+        [Header("Persistence")]
+        [Tooltip("Save the tank to persistentDataPath and restore it on start. Contract section 1: Unity owns the life, so this file is the authority on everything but the artwork.")]
+        [SerializeField] private bool persistenceEnabled = true;
+        [Tooltip("Seconds between automatic saves. The tank is also saved on quit; this is the safety net for a machine that loses power.")]
+        [SerializeField] private float saveIntervalSeconds = 20f;
+        [Tooltip("Capture ids remembered across restarts. Only has to cover Python's replay window, so this is generous. See FishCaptureRegistry.")]
+        [SerializeField] private int maxPersistedCaptureIds = 4096;
+        [Tooltip("Delete cached artwork for fish no longer in the tank. Off keeps every drawing ever captured, which is the safer default for an archive.")]
+        [SerializeField] private bool pruneUnusedArtwork = false;
+
+        [Header("Birth Moment")]
+        [Tooltip("Design point 28. Seconds a newly drawn fish is celebrated for. Never runs on a replay or a restore, which are the aquarium putting fish back rather than announcing them.")]
+        [SerializeField] private float birthMomentSeconds = 1.4f;
+        [Tooltip("How much brighter a fish glows during its birth moment. 1 disables the effect without disabling the timing.")]
+        [SerializeField] private float birthMomentBrightness = 2.1f;
 
         [Header("Socket.IO Source")]
         [Tooltip("Receive fish from the Python capture station over Socket.IO. Independent of the folder watcher; both can run at once.")]
@@ -674,6 +822,282 @@ namespace ViitorCloud.FishAquarium.Core {
             get { return aggressionEatCooldownRange; }
         }
 
+
+
+
+
+        public bool RarityEffectsEnabled {
+            get { return rarityEffectsEnabled; }
+        }
+
+        public AnimationCurve RarityGlowResponse {
+            get { return rarityGlowResponse; }
+        }
+
+        public float RarityMaximumGlow {
+            get { return rarityMaximumGlow; }
+        }
+
+        public FishRarityTier MinimumTrailTier {
+            get { return minimumTrailTier; }
+        }
+
+        public float RarityTrailSeconds {
+            get { return rarityTrailSeconds; }
+        }
+
+        public float RarityTrailStartWidth {
+            get { return rarityTrailStartWidth; }
+        }
+
+        public float RarityBirthLoudness {
+            get { return rarityBirthLoudness; }
+        }
+
+        public bool EyeHighlightEnabled {
+            get { return eyeHighlightEnabled; }
+        }
+
+        public float EyeHighlightScale {
+            get { return eyeHighlightScale; }
+        }
+
+        public Color EyeHighlightColour {
+            get { return eyeHighlightColour; }
+        }
+
+        public bool ObjectTypeBehavioursEnabled {
+            get { return objectTypeBehavioursEnabled; }
+        }
+
+        public float PlantSwayDegrees {
+            get { return plantSwayDegrees; }
+        }
+
+        public float PlantSwaySpeed {
+            get { return plantSwaySpeed; }
+        }
+
+        public float JellyfishPulseAmplitude {
+            get { return jellyfishPulseAmplitude; }
+        }
+
+        public float JellyfishPulseSpeed {
+            get { return jellyfishPulseSpeed; }
+        }
+
+        public float JellyfishDriftFactor {
+            get { return jellyfishDriftFactor; }
+        }
+
+        public float JellyfishGlowAmount {
+            get { return jellyfishGlowAmount; }
+        }
+
+        public float CreaturePredatorAggressionThreshold {
+            get { return creaturePredatorAggressionThreshold; }
+        }
+
+        public float CreatureFearRadius {
+            get { return creatureFearRadius; }
+        }
+
+        public float CreatureFleeStrength {
+            get { return creatureFleeStrength; }
+        }
+
+        public bool SocialBondsEnabled {
+            get { return socialBondsEnabled; }
+        }
+
+        public float BondRadius {
+            get { return bondRadius; }
+        }
+
+        public float SecondsTogetherToPair {
+            get { return secondsTogetherToPair; }
+        }
+
+        public float FamiliarityDecayPerSecond {
+            get { return familiarityDecayPerSecond; }
+        }
+
+        public float SecondsPerBrood {
+            get { return secondsPerBrood; }
+        }
+
+        public int MaxEggs {
+            get { return maxEggs; }
+        }
+
+        public float EggIncubationSeconds {
+            get { return eggIncubationSeconds; }
+        }
+
+        public float BroodTraitJitter {
+            get { return broodTraitJitter; }
+        }
+
+        public float BabyScaleFactor {
+            get { return babyScaleFactor; }
+        }
+
+        public float EggWorldSize {
+            get { return eggWorldSize; }
+        }
+
+        public int EggSortingOrder {
+            get { return eggSortingOrder; }
+        }
+
+        public bool AquariumEnergyEnabled {
+            get { return aquariumEnergyEnabled; }
+        }
+
+        public float EnergyRestingLevel {
+            get { return energyRestingLevel; }
+        }
+
+        public float EnergyPointerSpeedForFull {
+            get { return energyPointerSpeedForFull; }
+        }
+
+        public float EnergyRisePerSecond {
+            get { return energyRisePerSecond; }
+        }
+
+        public float EnergyDecayPerSecond {
+            get { return energyDecayPerSecond; }
+        }
+
+        public float EnergyPerCapture {
+            get { return energyPerCapture; }
+        }
+
+        public float EnergySpeedInfluence {
+            get { return energySpeedInfluence; }
+        }
+
+        public bool CurrentsEnabled {
+            get { return currentsEnabled; }
+        }
+
+        public float CurrentScale {
+            get { return currentScale; }
+        }
+
+        public float CurrentStrength {
+            get { return currentStrength; }
+        }
+
+        public float MigrationPeriodSeconds {
+            get { return migrationPeriodSeconds; }
+        }
+
+        public float MigrationStrength {
+            get { return migrationStrength; }
+        }
+
+        public float StormTurbulence {
+            get { return stormTurbulence; }
+        }
+
+        public float DayLengthSeconds {
+            get { return dayLengthSeconds; }
+        }
+
+        public float NightDarkening {
+            get { return nightDarkening; }
+        }
+
+        public float StormIntervalSeconds {
+            get { return stormIntervalSeconds; }
+        }
+
+        public float StormDurationSeconds {
+            get { return stormDurationSeconds; }
+        }
+
+        public float StormRampSeconds {
+            get { return stormRampSeconds; }
+        }
+
+        public Color StormWaterTint {
+            get { return stormWaterTint; }
+        }
+
+        public bool PredatorEnabled {
+            get { return predatorEnabled; }
+        }
+
+        public float PredatorIntervalSeconds {
+            get { return predatorIntervalSeconds; }
+        }
+
+        public float PredatorCrossingSeconds {
+            get { return predatorCrossingSeconds; }
+        }
+
+        public float PredatorFadeSeconds {
+            get { return predatorFadeSeconds; }
+        }
+
+        public float PredatorFearRadius {
+            get { return predatorFearRadius; }
+        }
+
+        public float PredatorFleeStrength {
+            get { return predatorFleeStrength; }
+        }
+
+        public float PredatorPanicSpeedMultiplier {
+            get { return predatorPanicSpeedMultiplier; }
+        }
+
+        public float PredatorWorldLength {
+            get { return predatorWorldLength; }
+        }
+
+        public Color PredatorColour {
+            get { return predatorColour; }
+        }
+
+        public int PredatorSortingOrder {
+            get { return predatorSortingOrder; }
+        }
+
+        public bool DepartingFishSwimAway {
+            get { return departingFishSwimAway; }
+        }
+
+        public float DepartureSwimStrength {
+            get { return departureSwimStrength; }
+        }
+
+        public bool PersistenceEnabled {
+            get { return persistenceEnabled; }
+        }
+
+        public float SaveIntervalSeconds {
+            get { return saveIntervalSeconds; }
+        }
+
+        public int MaxPersistedCaptureIds {
+            get { return maxPersistedCaptureIds; }
+        }
+
+        public bool PruneUnusedArtwork {
+            get { return pruneUnusedArtwork; }
+        }
+
+        public float BirthMomentSeconds {
+            get { return birthMomentSeconds; }
+        }
+
+        public float BirthMomentBrightness {
+            get { return birthMomentBrightness; }
+        }
+
         public Color FoodColour {
             get { return foodColour; }
         }
@@ -906,6 +1330,56 @@ namespace ViitorCloud.FishAquarium.Core {
             if (string.IsNullOrWhiteSpace(fileSearchPattern)) {
                 fileSearchPattern = "*.png";
             }
+
+            rarityMaximumGlow = Mathf.Max(0f, rarityMaximumGlow);
+            rarityTrailSeconds = Mathf.Max(0.01f, rarityTrailSeconds);
+            rarityTrailStartWidth = Mathf.Max(0.001f, rarityTrailStartWidth);
+            rarityBirthLoudness = Mathf.Max(1f, rarityBirthLoudness);
+            eyeHighlightScale = Mathf.Max(0.01f, eyeHighlightScale);
+            rarityGlowResponse = RepairCurve(rarityGlowResponse, 0f, 1f);
+
+            plantSwayDegrees = Mathf.Max(0f, plantSwayDegrees);
+            plantSwaySpeed = Mathf.Max(0f, plantSwaySpeed);
+            jellyfishPulseAmplitude = Mathf.Max(0f, jellyfishPulseAmplitude);
+            jellyfishPulseSpeed = Mathf.Max(0f, jellyfishPulseSpeed);
+            jellyfishGlowAmount = Mathf.Max(0f, jellyfishGlowAmount);
+            creatureFearRadius = Mathf.Max(0.01f, creatureFearRadius);
+            creatureFleeStrength = Mathf.Max(0f, creatureFleeStrength);
+
+            bondRadius = Mathf.Max(0.01f, bondRadius);
+            secondsTogetherToPair = Mathf.Max(0.1f, secondsTogetherToPair);
+            familiarityDecayPerSecond = Mathf.Max(0f, familiarityDecayPerSecond);
+            secondsPerBrood = Mathf.Max(0.1f, secondsPerBrood);
+            maxEggs = Mathf.Max(1, maxEggs);
+            eggIncubationSeconds = Mathf.Max(0.1f, eggIncubationSeconds);
+            eggWorldSize = Mathf.Max(0.01f, eggWorldSize);
+
+            energyPointerSpeedForFull = Mathf.Max(0.01f, energyPointerSpeedForFull);
+            energyRisePerSecond = Mathf.Max(0f, energyRisePerSecond);
+            energyDecayPerSecond = Mathf.Max(0f, energyDecayPerSecond);
+            energySpeedInfluence = Mathf.Max(0f, energySpeedInfluence);
+            currentScale = Mathf.Max(0.01f, currentScale);
+            currentStrength = Mathf.Max(0f, currentStrength);
+            migrationPeriodSeconds = Mathf.Max(1f, migrationPeriodSeconds);
+            migrationStrength = Mathf.Max(0f, migrationStrength);
+            stormTurbulence = Mathf.Max(0f, stormTurbulence);
+            dayLengthSeconds = Mathf.Max(1f, dayLengthSeconds);
+            stormIntervalSeconds = Mathf.Max(1f, stormIntervalSeconds);
+            stormDurationSeconds = Mathf.Max(0f, stormDurationSeconds);
+            stormRampSeconds = Mathf.Max(0.01f, stormRampSeconds);
+            predatorIntervalSeconds = Mathf.Max(1f, predatorIntervalSeconds);
+            predatorCrossingSeconds = Mathf.Max(0.5f, predatorCrossingSeconds);
+            predatorFadeSeconds = Mathf.Max(0.01f, predatorFadeSeconds);
+            predatorFearRadius = Mathf.Max(0.01f, predatorFearRadius);
+            predatorFleeStrength = Mathf.Max(0f, predatorFleeStrength);
+            predatorPanicSpeedMultiplier = Mathf.Max(1f, predatorPanicSpeedMultiplier);
+            predatorWorldLength = Mathf.Max(0.1f, predatorWorldLength);
+            departureSwimStrength = Mathf.Max(0f, departureSwimStrength);
+
+            saveIntervalSeconds = Mathf.Max(1f, saveIntervalSeconds);
+            maxPersistedCaptureIds = Mathf.Max(1, maxPersistedCaptureIds);
+            birthMomentSeconds = Mathf.Max(0f, birthMomentSeconds);
+            birthMomentBrightness = Mathf.Max(1f, birthMomentBrightness);
 
             feedSurfaceBand = Mathf.Clamp(feedSurfaceBand, 0.02f, 0.6f);
             foodPerPinch = Mathf.Max(1, foodPerPinch);

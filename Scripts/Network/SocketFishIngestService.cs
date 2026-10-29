@@ -168,6 +168,15 @@ namespace ViitorCloud.FishAquarium.Network {
         }
 
         /// <summary>
+        /// Marks capture ids restored from disk as already processed, so Python's replay burst on the next
+        /// connect is deduplicated against the fish the aquarium has just reloaded rather than spawning a
+        /// second copy of each.
+        /// </summary>
+        public void SeedKnownCaptures(IList<string> captureIds) {
+            decodeQueue.SeedKnownCaptures(captureIds);
+        }
+
+        /// <summary>
         /// Injects raw capture JSON as if the socket had delivered it, exercising the real path: queue to a
         /// worker, parse and decode there, spawn on the main thread.
         /// </summary>
@@ -338,6 +347,43 @@ namespace ViitorCloud.FishAquarium.Network {
 
             spawnedCount++;
             lastLoadedFileName = decoded.Id + (decoded.IsReplay ? " (replay)" : string.Empty);
+
+            fish.ApplyEyeMarker(decoded.EyeUv, decoded.EyeRadius);
+
+            CacheArtwork(decoded);
+            RecordInCalendar(decoded);
+        }
+
+        /// <summary>
+        /// Keeps a local copy of the drawing so the aquarium can rebuild this fish without Python.
+        /// Section 8 replays only the ten most recent captures, so without this a restart loses every
+        /// fish older than that. Already-cached artwork is a no-op, which is the common case on a
+        /// reconnect burst.
+        /// </summary>
+        private void CacheArtwork(FishPayloadDecodeQueue.DecodedFish decoded) {
+            if (config == null || !config.PersistenceEnabled) {
+                return;
+            }
+
+            string cacheError;
+            if (!FishArtworkCache.TryStore(decoded.Id, decoded.PngBytes, out cacheError)) {
+                Debug.LogWarning("SocketFishIngestService: could not cache the artwork for " + decoded.Id +
+                                 " - " + cacheError + ". The fish is fine, but it will not survive a restart.");
+            }
+        }
+
+        /// <summary> Feeds design point 29's "created today" tally. A replayed capture is not a new drawing. </summary>
+        private void RecordInCalendar(FishPayloadDecodeQueue.DecodedFish decoded) {
+            if (decoded.IsReplay || aquariumManager == null || aquariumManager.Calendar == null) {
+                return;
+            }
+
+            aquariumManager.Calendar.RecordCapture(decoded.Timestamp, decoded.Sequence, System.DateTime.Now);
+
+            // A new drawing lifts the whole tank's mood, not just its own fish. Design point 11.
+            if (aquariumManager.Energy != null) {
+                aquariumManager.Energy.RecordCapture();
+            }
         }
     }
 }

@@ -34,15 +34,28 @@ namespace ViitorCloud.FishAquarium.Core {
         private Vector2[] snapshotHeadings = new Vector2[0];
         private float[] snapshotNovelty = new float[0];
 
+        /// <summary> How frightening each drawing is. Non-zero only for confidently classified, aggressive creatures. </summary>
+        private float[] snapshotThreat = new float[0];
+
         /// <summary> Snapshot indices of the fish that arrived recently enough to still draw a crowd. Usually empty. </summary>
         private int[] novelIndices = new int[0];
 
         private readonly List<int> foodWinners = new List<int>();
+        private readonly List<long> pairsReadyToLay = new List<long>();
+        private readonly List<int> hatchedEggs = new List<int>();
+        private readonly CaptureCalendar calendar = new CaptureCalendar();
 
         private int[] neighbourBuffer = new int[0];
         private IPointerSource pointerSource;
         private RippleField ripples;
         private FoodField food;
+        private AquariumEnergy energy;
+        private AquariumCycle cycle;
+        private AquariumPredator predator;
+        private FishBondRegistry bonds;
+        private EggField eggs;
+        [SerializeField] private FishFactory fishFactory;
+        private float worldTime;
         private int snapshotCount;
         private int novelCount;
         private int nextFishId = 1;
@@ -85,6 +98,58 @@ namespace ViitorCloud.FishAquarium.Core {
             get { return food; }
         }
 
+        /// <summary> How many drawings arrived today, design point 29. Never null. </summary>
+        public CaptureCalendar Calendar {
+            get { return calendar; }
+        }
+
+        /// <summary>
+        /// How alive the tank feels, 0..1. Design point 11: one value that fish speed, bubble density and
+        /// the water's brightness all read, so the aquarium has a single mood rather than several.
+        /// </summary>
+        public AquariumEnergy Energy {
+            get { return energy; }
+        }
+
+        /// <summary> Time of day and weather. Never null. </summary>
+        public AquariumCycle Cycle {
+            get { return cycle; }
+        }
+
+        /// <summary> The thing that crosses the tank now and then and scatters everything. Never null. </summary>
+        public AquariumPredator Predator {
+            get { return predator; }
+        }
+
+        /// <summary> Who is fond of whom, and which pairs are expecting. Design points 5 and 8. Never null. </summary>
+        public FishBondRegistry Bonds {
+            get { return bonds; }
+        }
+
+        /// <summary> Eggs waiting to hatch. Never null; the renderer reads it every frame. </summary>
+        public EggField Eggs {
+            get { return eggs; }
+        }
+
+        /// <summary> Seconds the tank has been running. Drives the current, which is a function of position and time. </summary>
+        public float WorldTime {
+            get { return worldTime; }
+        }
+
+        /// <summary>
+        /// Speed multiplier every fish applies, from the tank's mood. A busy aquarium swims faster, which
+        /// is the most legible of the energy outputs and the reason it is wired here rather than per fish.
+        /// </summary>
+        public float EnergySpeedMultiplier {
+            get {
+                if (config == null || !config.AquariumEnergyEnabled || energy == null) {
+                    return 1f;
+                }
+
+                return 1f + (energy.Current * config.EnergySpeedInfluence);
+            }
+        }
+
         /// <summary> Fish that are not already fading out. This is the number the maximum-count policy applies to. </summary>
         public int LiveFishCount {
             get { return CountLiveFish(); }
@@ -114,6 +179,7 @@ namespace ViitorCloud.FishAquarium.Core {
             ResolvePointerSource();
             BuildRippleField();
             BuildFoodField();
+            BuildWorldSystems();
         }
 
         private void OnEnable() {
@@ -141,6 +207,11 @@ namespace ViitorCloud.FishAquarium.Core {
 
             ripples.Tick(deltaTime);
             food.Tick(deltaTime, ResolveFoodRestingHeight());
+
+            // The world is advanced before any fish reads it, so every fish in a frame sees the same
+            // current, the same weather and the same threat.
+            TickWorldSystems(deltaTime);
+
             RebuildNeighbourIndex();
 
             for (int i = 0; i < activeFish.Count; i++) {
@@ -156,6 +227,10 @@ namespace ViitorCloud.FishAquarium.Core {
             // resolving mid-loop would award each flake to whichever fish happened to come first in the
             // list rather than to the most aggressive one.
             ResolveFoodClaims();
+
+            // Courtship runs after the fish have moved, so familiarity is judged on where they ended the
+            // frame rather than where they started it.
+            TickSocialBonds(deltaTime);
 
             CollectCompletedRemovals();
         }
@@ -245,6 +320,22 @@ namespace ViitorCloud.FishAquarium.Core {
             novelCount = 0;
             spatialHash.Clear();
             food.Clear();
+
+            if (energy != null) {
+                energy.Reset();
+            }
+
+            if (predator != null) {
+                predator.Reset();
+            }
+
+            if (bonds != null) {
+                bonds.Clear();
+            }
+
+            if (eggs != null) {
+                eggs.Clear();
+            }
         }
 
         /// <summary>
@@ -259,6 +350,15 @@ namespace ViitorCloud.FishAquarium.Core {
         /// solitary fish gets neither and keeps to the edges while a sociable one falls in with the school.
         /// </summary>
         public Vector2 CalculateFlocking(FishController self, Vector2 position, Vector2 heading, FishTraits traits) {
+            return CalculateFlocking(self, position, heading, traits, true);
+        }
+
+        /// <summary>
+        /// As above, but schoolsWithOthers says whether this drawing joins a school at all. A jellyfish
+        /// does not - contract section 5 - though it still separates from its neighbours, because that is
+        /// collision avoidance rather than sociability.
+        /// </summary>
+        public Vector2 CalculateFlocking(FishController self, Vector2 position, Vector2 heading, FishTraits traits, bool schoolsWithOthers) {
             if (self == null || config == null || snapshotCount <= 1) {
                 return Vector2.zero;
             }
@@ -267,7 +367,7 @@ namespace ViitorCloud.FishAquarium.Core {
             Vector2 steer = CalculateNoveltyAttraction(selfIndex, position, traits);
 
             bool wantsSeparation = config.SeparationEnabled;
-            bool wantsFlocking = config.FlockingEnabled;
+            bool wantsFlocking = config.FlockingEnabled && schoolsWithOthers;
 
             if (!wantsSeparation && !wantsFlocking) {
                 return steer;
@@ -275,7 +375,9 @@ namespace ViitorCloud.FishAquarium.Core {
 
             float separationRadius = config.SeparationRadius;
             float neighbourRadius = wantsFlocking ? config.NeighbourRadius : separationRadius;
-            int candidateCount = spatialHash.Query(position, Mathf.Max(separationRadius, neighbourRadius), neighbourBuffer);
+            float creatureRadius = config.ObjectTypeBehavioursEnabled ? config.CreatureFearRadius : 0f;
+            float queryRadius = Mathf.Max(Mathf.Max(separationRadius, neighbourRadius), creatureRadius);
+            int candidateCount = spatialHash.Query(position, queryRadius, neighbourBuffer);
 
             if (candidateCount == 0) {
                 return steer;
@@ -307,6 +409,12 @@ namespace ViitorCloud.FishAquarium.Core {
                     positionSum += otherPosition;
                     neighbourCount++;
                 }
+
+                // A predatory creature nearby. Contract section 5: a creature is eligible to be a
+                // predator, so the other drawings give it room.
+                if (snapshotThreat[index] > 0f && creatureRadius > 0f && squaredDistance < creatureRadius * creatureRadius) {
+                    steer += BuildCreatureFlee(position, otherPosition, snapshotThreat[index], traits, creatureRadius);
+                }
             }
 
             steer += separation * config.SeparationStrength;
@@ -323,6 +431,26 @@ namespace ViitorCloud.FishAquarium.Core {
             steer += FishFlocking.CohesionDirection(positionSum, neighbourCount, position) * cohesionWeight;
 
             return steer;
+        }
+
+        /// <summary>
+        /// Flee force from one predatory creature. Weaker and much shorter-ranged than the procedural
+        /// predator of design point 20: that is a rare event which empties the tank, this is a bully that
+        /// other fish simply keep away from.
+        /// </summary>
+        private Vector2 BuildCreatureFlee(Vector2 position, Vector2 creaturePosition, float threat, FishTraits traits, float radius) {
+            Vector2 away = position - creaturePosition;
+            float distance = away.magnitude;
+
+            if (distance <= 0.0001f) {
+                return Vector2.up * config.CreatureFleeStrength * threat;
+            }
+
+            float closeness = 1f - Mathf.Clamp01(distance / radius);
+
+            // Even a bold fish gives a predator room, at about half the strength of a nervous one.
+            float nerve = Mathf.Lerp(0.5f, 1f, traits != null ? traits.Fear : 0.5f);
+            return (away / distance) * config.CreatureFleeStrength * threat * closeness * nerve;
         }
 
         /// <summary>
@@ -401,6 +529,101 @@ namespace ViitorCloud.FishAquarium.Core {
         /// just dropped is the opposite of what the gesture is for, and it would make the cause and effect
         /// unreadable - which is the one thing the pointer interactions have to get right.
         /// </summary>
+        /// <summary>
+        /// Built once from the config, like the ripple and food fields. Always constructed even when the
+        /// features are switched off, so nothing downstream has to null-check them on the hot path.
+        /// </summary>
+        private void BuildWorldSystems() {
+            if (config == null) {
+                energy = new AquariumEnergy(0.35f, 0.8f, 0.12f, 0.25f);
+                cycle = new AquariumCycle(300f, 110f, 22f, 5f);
+                predator = new AquariumPredator(165f, 11f, 2.5f);
+                bonds = new FishBondRegistry(14f, 0.6f, 30f);
+                eggs = new EggField(8, 12f);
+                return;
+            }
+
+            energy = new AquariumEnergy(config.EnergyRestingLevel, config.EnergyRisePerSecond, config.EnergyDecayPerSecond, config.EnergyPerCapture);
+            cycle = new AquariumCycle(config.DayLengthSeconds, config.StormIntervalSeconds, config.StormDurationSeconds, config.StormRampSeconds);
+            predator = new AquariumPredator(config.PredatorIntervalSeconds, config.PredatorCrossingSeconds, config.PredatorFadeSeconds);
+            bonds = new FishBondRegistry(config.SecondsTogetherToPair, config.FamiliarityDecayPerSecond, config.SecondsPerBrood);
+            eggs = new EggField(config.MaxEggs, config.EggIncubationSeconds);
+        }
+
+        /// <summary>
+        /// Advances the mood, the weather and the predator, once per frame and before any fish reads them.
+        /// The visitor's contribution to the mood is pointer speed, which is the one signal available
+        /// without person tracking.
+        /// </summary>
+        private void TickWorldSystems(float deltaTime) {
+            worldTime += deltaTime;
+
+            cycle.Tick(deltaTime);
+
+            if (config != null && config.PredatorEnabled && bounds != null) {
+                predator.Tick(deltaTime, bounds.Area);
+            }
+
+            float stimulus = 0f;
+            if (pointerSource != null && pointerSource.IsAvailable && config != null) {
+                stimulus = Mathf.Clamp01(pointerSource.Speed / Mathf.Max(0.01f, config.EnergyPointerSpeedForFull));
+            }
+
+            energy.Tick(deltaTime, stimulus);
+        }
+
+        /// <summary>
+        /// The current at a point: broad slow eddies plus the prevailing drift, roughened by any storm.
+        /// Read by every fish each frame, which is affordable because the flow is a pure function rather
+        /// than a grid anybody has to own.
+        /// </summary>
+        public Vector2 SampleCurrent(Vector2 position) {
+            if (config == null || !config.CurrentsEnabled) {
+                return Vector2.zero;
+            }
+
+            float turbulence = config.StormTurbulence * cycle.StormIntensity;
+
+            Vector2 flow = AquariumFlow.Sample(position, worldTime, config.CurrentScale, config.CurrentStrength, turbulence);
+            flow += AquariumFlow.SampleMigration(worldTime, config.MigrationPeriodSeconds, config.MigrationStrength);
+            return flow;
+        }
+
+        /// <summary>
+        /// Flee force from the predator, and how panicked the fish is about it, 0..1.
+        ///
+        /// Every fish reacts, however brave: a fish with fear 0 still runs, just less hard. That is the
+        /// difference between a predator and the pointer - the pointer is a curiosity, this is a threat.
+        /// </summary>
+        public Vector2 CalculatePredatorFlee(Vector2 position, float fear, out float panic) {
+            panic = 0f;
+
+            if (config == null || !config.PredatorEnabled || predator == null || !predator.IsPresent) {
+                return Vector2.zero;
+            }
+
+            float threat = predator.Threat;
+            if (threat <= 0f) {
+                return Vector2.zero;
+            }
+
+            Vector2 away = position - predator.Position;
+            float distance = away.magnitude;
+
+            if (distance >= config.PredatorFearRadius) {
+                return Vector2.zero;
+            }
+
+            float closeness = 1f - (distance / config.PredatorFearRadius);
+
+            // Even a fearless fish flees, at roughly half strength. Fear scales the panic on top.
+            float nerve = Mathf.Lerp(0.5f, 1f, Mathf.Clamp01(fear));
+            panic = Mathf.Clamp01(threat * closeness * nerve);
+
+            Vector2 direction = distance > 0.0001f ? (away / distance) : Vector2.up;
+            return direction * config.PredatorFleeStrength * panic;
+        }
+
         private void HandlePointerPressed(Vector2 worldPosition) {
             if (config == null || !config.PointerInteractionEnabled) {
                 return;
@@ -446,6 +669,163 @@ namespace ViitorCloud.FishAquarium.Core {
             }
 
             return bounds.GetPaddedArea(config.BoundsPadding).yMin;
+        }
+
+        /// <summary>
+        /// Advances courtship, laying and hatching. Design points 5 and 8.
+        ///
+        /// Company is judged on nearest neighbours only. A fish surrounded by six others is not keeping
+        /// company with all six - it is in a shoal - and crediting every pair in a crowd would have the
+        /// whole tank paired within a minute of the first school forming.
+        /// </summary>
+        private void TickSocialBonds(float deltaTime) {
+            if (config == null || !config.SocialBondsEnabled || bonds == null) {
+                return;
+            }
+
+            AccrueFamiliarity(deltaTime);
+
+            bonds.Tick(deltaTime, pairsReadyToLay);
+
+            for (int i = 0; i < pairsReadyToLay.Count; i++) {
+                TryLayEgg(pairsReadyToLay[i]);
+            }
+
+            HatchEggs(deltaTime);
+        }
+
+        private void AccrueFamiliarity(float deltaTime) {
+            if (snapshotCount <= 1) {
+                return;
+            }
+
+            float radius = config.BondRadius;
+
+            for (int i = 0; i < activeFish.Count; i++) {
+                FishController fish = activeFish[i];
+                if (fish == null || fish.Data == null || fish.State != FishLifecycleState.Swimming) {
+                    continue;
+                }
+
+                int nearest = FindNearestFishId(fish, radius);
+                if (nearest > 0) {
+                    bonds.RecordProximity(fish.Data.Id, nearest, deltaTime);
+                }
+            }
+        }
+
+        /// <summary> Nearest other fish within radius, by fish id, or 0 when it is swimming alone. </summary>
+        private int FindNearestFishId(FishController self, float radius) {
+            int candidateCount = spatialHash.Query(self.Position, radius, neighbourBuffer);
+            if (candidateCount == 0) {
+                return 0;
+            }
+
+            int selfIndex = self.SnapshotIndex;
+            float bestSquared = radius * radius;
+            int bestSnapshotIndex = -1;
+
+            for (int i = 0; i < candidateCount; i++) {
+                int index = neighbourBuffer[i];
+                if (index == selfIndex) {
+                    continue;
+                }
+
+                float squared = (snapshotPositions[index] - self.Position).sqrMagnitude;
+                if (squared > bestSquared) {
+                    continue;
+                }
+
+                bestSquared = squared;
+                bestSnapshotIndex = index;
+            }
+
+            if (bestSnapshotIndex < 0) {
+                return 0;
+            }
+
+            // The snapshot holds positions, not fish, so the owner has to be found by its index.
+            for (int i = 0; i < activeFish.Count; i++) {
+                FishController other = activeFish[i];
+                if (other != null && other.Data != null && other.SnapshotIndex == bestSnapshotIndex) {
+                    return other.Data.Id;
+                }
+            }
+
+            return 0;
+        }
+
+        private void TryLayEgg(long pairKey) {
+            int firstId, secondId;
+            bonds.UnpackKey(pairKey, out firstId, out secondId);
+
+            FishController first = FindFishById(firstId);
+            FishController second = FindFishById(secondId);
+
+            if (first == null || second == null || first.Data == null || second.Data == null) {
+                return;
+            }
+
+            if (eggs.ActiveCount >= eggs.Capacity) {
+                // No room. The brood stays at its threshold and will try again next frame rather than
+                // resetting, so a full nursery only delays a pair instead of denying them.
+                return;
+            }
+
+            FishTraits blended = FishTraitBlend.Blend(first.Data.Traits, second.Data.Traits,
+                bonds.GetBroodCount(pairKey), config.BroodTraitJitter,
+                "baby_" + firstId.ToString() + "_" + secondId.ToString() + "_" + bonds.GetBroodCount(pairKey).ToString());
+
+            Vector2 position = (first.Position + second.Position) * 0.5f;
+            Color tint = Color.Lerp(first.Data.Traits.DominantColour, second.Data.Traits.DominantColour, 0.5f);
+            float scale = FishTraitBlend.BlendWorldScale(first.Data.WorldScale, second.Data.WorldScale, config.BabyScaleFactor);
+
+            if (eggs.TryLay(position, blended, first.Data.SourceFilePath, tint, scale)) {
+                bonds.ConsumeBrood(pairKey);
+            }
+        }
+
+        private void HatchEggs(float deltaTime) {
+            if (eggs.CollectHatched(deltaTime, hatchedEggs) == 0) {
+                return;
+            }
+
+            for (int i = 0; i < hatchedEggs.Count; i++) {
+                int index = hatchedEggs[i];
+
+                EggField.Egg egg;
+                if (!eggs.TryGetEgg(index, out egg)) {
+                    continue;
+                }
+
+                if (fishFactory == null) {
+                    // Nothing can hatch without a factory, and leaving the egg would have it retried
+                    // every frame forever.
+                    eggs.Remove(index);
+                    continue;
+                }
+
+                FishController baby = fishFactory.CreateBaby(egg.SpriteKey, egg.Traits, egg.Tint, egg.WorldScale, egg.Position);
+
+                // The egg is removed either way. A baby the tank had no room for is not kept waiting:
+                // the pair simply starts another brood.
+                eggs.Remove(index);
+
+                if (baby == null) {
+                    continue;
+                }
+            }
+        }
+
+        private FishController FindFishById(int fishId) {
+            for (int i = 0; i < activeFish.Count; i++) {
+                FishController fish = activeFish[i];
+                if (fish != null && fish.Data != null && fish.Data.Id == fishId) {
+                    return fish;
+                }
+            }
+
+            return null;
         }
 
         private void ResolveFoodClaims() {
@@ -519,6 +899,12 @@ namespace ViitorCloud.FishAquarium.Core {
 
             float noveltySeconds = config != null && config.NoveltyEnabled ? config.NoveltySeconds : 0f;
 
+            // Negative disables the creature-threat channel, which is cheaper than testing the config
+            // flag once per fish.
+            float creatureThreshold = config != null && config.ObjectTypeBehavioursEnabled
+                ? config.CreaturePredatorAggressionThreshold
+                : -1f;
+
             snapshotCount = 0;
             novelCount = 0;
 
@@ -534,6 +920,9 @@ namespace ViitorCloud.FishAquarium.Core {
 
                 float novelty = fish.EvaluateNovelty(noveltySeconds);
                 snapshotNovelty[snapshotCount] = novelty;
+                snapshotThreat[snapshotCount] = creatureThreshold >= 0f && fish.Data != null
+                    ? FishBehaviourProfile.EvaluateThreat(fish.Data.Traits, creatureThreshold)
+                    : 0f;
 
                 if (novelty > 0f) {
                     novelIndices[novelCount] = snapshotCount;
@@ -573,6 +962,7 @@ namespace ViitorCloud.FishAquarium.Core {
                 snapshotPositions = new Vector2[capacity];
                 snapshotHeadings = new Vector2[capacity];
                 snapshotNovelty = new float[capacity];
+                snapshotThreat = new float[capacity];
                 novelIndices = new int[capacity];
             }
 
@@ -608,6 +998,11 @@ namespace ViitorCloud.FishAquarium.Core {
 
             if (FishRemoved != null) {
                 FishRemoved(fish);
+            }
+
+            // A partner left waiting for a fish that no longer exists would never brood again.
+            if (bonds != null && fish.Data != null) {
+                bonds.Forget(fish.Data.Id);
             }
 
             Destroy(fish.gameObject);

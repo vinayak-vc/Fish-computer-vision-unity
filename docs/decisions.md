@@ -4,6 +4,65 @@ Newest first. Each entry records what was decided, why, and what it costs.
 
 ---
 
+## D-010 — Tail-bone deformation is deferred; the coordinate flip is not
+
+**Decision.** M9 implements the top-left to bottom-left y flip, the confidence rule, the geometric
+fallbacks and the eye highlight. It does **not** deform the tail to the tail landmark.
+
+**Why.** `anatomy` is `null` on every payload today — Python phase 2 — and section 7 says it may stay
+null. A deformation cannot be judged against landmarks that do not exist: there is no way to see
+whether it looks right, no way to test it against real data, and a good chance it would be rebuilt
+against the first genuine landmark set anyway.
+
+What *is* built is the part that will be wrong-by-default if left until then. The flip lives in exactly
+one function, `FishAnatomyLandmarks.ToSpriteUv`, and is tested from both directions, because the
+contract's own warning is that getting it wrong "looks like a detection failure rather than a
+coordinate bug" — it gets investigated in Python, where nothing is wrong. The tail point is resolved
+and carried alongside the eye, so pinning the existing tail beat to it is a change in one place.
+
+**Cost.** Design point 26 is half-delivered, and said so in [roadmap.md](roadmap.md) and
+[tasks.md](tasks.md) rather than quietly.
+
+---
+
+## D-009 — Babies are never persisted
+
+**Decision.** A fish born in the tank is marked `IsPersistable = false` and skipped by the save file.
+
+**Why.** Design point 5 is explicit that a baby is not an archived capture: Python never sees one and
+holds no artwork for it. Persistence restores a fish by loading its PNG from the artwork cache, and a
+baby has no PNG of its own — it wears a parent's drawing tinted with a blend of both parents' colours.
+Saving one would produce a record that could never be restored, and a warning on every start.
+
+**Cost.** A tank left running overnight loses its babies on restart while keeping every drawn fish. The
+alternative — inventing and caching a composited PNG for each baby — would mean generating artwork
+nobody drew and archiving it next to work that people did, which is worse than losing it.
+
+---
+
+## D-008 — A baby's colour comes from Python's `dominant_colors`, never from the texture
+
+**Decision.** `FishTraits` carries a `DominantColour`, resolved from `features.dominant_colors[0]` by
+`FishTraitResolver`. A baby is tinted with the blend of its parents' values.
+
+**Why.** Design point 5 asks for "colour and scale blended from the parents' sprites". The obvious
+reading — average the two PNGs — would mean reading and mixing pixels in Unity, and "No image analysis
+in Unity. Ever." is an explicit non-goal of the brief. Python already holds the segmentation mask and
+has computed exactly this; a Unity-side average of a flattened PNG would be both worse and inconsistent
+with the archive.
+
+So the baby wears one parent's shape under a blend of both parents' measured colours. That reads as a
+cross between the two without Unity ever touching the artwork.
+
+**One detail worth keeping.** The hex is parsed by hand rather than with `ColorUtility`, because trait
+resolution runs on a decode worker and `UnityEngine` statics are not documented as thread-safe. Six hex
+digits is arithmetic; doing it inline removes the question.
+
+**Cost.** A drawing whose payload has no `features` block gets white, so its babies inherit no colour
+from it. Legacy schema v1 captures are exactly that case.
+
+---
+
 ## D-007 — Aggression needs a channel that always applies, not just contested flakes
 
 **Decision.** Aggression decides two things about feeding, not one: who wins a flake two fish both
