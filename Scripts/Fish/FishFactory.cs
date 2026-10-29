@@ -81,6 +81,7 @@ namespace ViitorCloud.FishAquarium.Fish {
 
             FishData data = new FishData(aquariumManager.ReserveFishId(), fileName, sourceKey, sprite, traits);
             data.ApplyTraitProfile(config);
+            data.SetForegroundArea(foregroundArea);
             data.SetWorldScale(CalculateWorldScale(sprite, data, foregroundArea));
 
             Vector2 initialHeading;
@@ -95,6 +96,68 @@ namespace ViitorCloud.FishAquarium.Fish {
             fish.transform.SetParent(aquariumManager.FishContainer, false);
 
             fish.Initialize(data, config, bounds, aquariumManager, aquariumManager.ReserveSpawnOrder(), initialHeading, spawnSilently);
+            aquariumManager.RegisterFish(fish);
+
+            return fish;
+        }
+
+        /// <summary>
+        /// Hatches a baby. Design point 5: a small fish whose colour and scale are blended from its
+        /// parents and whose traits are a noisy average of theirs.
+        ///
+        /// It borrows a parent's drawing rather than compositing a new one. Blending two arbitrary PNGs
+        /// into a third would mean reading and mixing pixels in Unity, and "no image analysis in Unity"
+        /// is an explicit non-goal of the brief - so the baby wears one parent's shape, tinted with the
+        /// blend of both parents' dominant colours, which Python measured. That reads as a cross between
+        /// the two without Unity ever touching the artwork.
+        ///
+        /// Acquiring the parent's sprite key again takes another reference on the shared texture, so the
+        /// baby keeps its drawing alive even if that parent is removed.
+        /// </summary>
+        public FishController CreateBaby(string parentSpriteKey, FishTraits blendedTraits, Color tint, float worldScale, Vector2 position) {
+            if (config == null || aquariumManager == null || bounds == null) {
+                Debug.LogError("FishFactory: cannot hatch a baby, dependencies are missing.");
+                return null;
+            }
+
+            if (blendedTraits == null) {
+                Debug.LogError("FishFactory: CreateBaby called with no traits.");
+                return null;
+            }
+
+            Sprite sprite;
+            string error;
+
+            if (!FishSpriteCache.TryAcquireExisting(parentSpriteKey, out sprite, out error)) {
+                Debug.LogWarning("FishFactory: cannot hatch a baby - " + error + ". Its parent's drawing is gone.");
+                return null;
+            }
+
+            if (!aquariumManager.TryMakeRoomForNewFish()) {
+                FishSpriteCache.Release(parentSpriteKey);
+                return null;
+            }
+
+            FishData data = new FishData(aquariumManager.ReserveFishId(), "baby of " + parentSpriteKey, parentSpriteKey, sprite, blendedTraits);
+            data.ApplyTraitProfile(config);
+            data.SetForegroundArea(0);
+            data.OverrideWorldScale(worldScale);
+            data.MarkAsUnpersistable();
+            data.SetSpawnPosition(position);
+
+            FishController fish = InstantiateFish();
+            if (fish == null) {
+                FishSpriteCache.Release(parentSpriteKey);
+                return null;
+            }
+
+            fish.name = "Baby_" + data.Id.ToString("D3");
+            fish.transform.SetParent(aquariumManager.FishContainer, false);
+
+            // Hatched in place, so no entrance animation - it does not swim in from an edge, it appears
+            // where its egg was. It still gets the birth moment, because a hatching is an arrival.
+            fish.Initialize(data, config, bounds, aquariumManager, aquariumManager.ReserveSpawnOrder(), UnityEngine.Random.insideUnitCircle.normalized, true);
+            fish.ApplyTint(tint);
             aquariumManager.RegisterFish(fish);
 
             return fish;
@@ -132,6 +195,15 @@ namespace ViitorCloud.FishAquarium.Fish {
         /// and M5 will persist real positions anyway. Every value that IS identity comes from FishData.
         /// </summary>
         private Vector2 ChooseSpawnPosition(FishData data, out Vector2 initialHeading, bool forceInsideBounds) {
+            // A plant or a rock is placed on the floor, not swum in from an edge. Contract section 5.
+            if (config.ObjectTypeBehavioursEnabled && data.Traits != null && FishBehaviourProfile.Anchors(data.Traits.ObjectType)) {
+                initialHeading = Vector2.right;
+
+                Rect floorArea = bounds.GetPaddedArea(config.BoundsPadding);
+                float x = UnityEngine.Random.Range(floorArea.xMin, floorArea.xMax);
+                return new Vector2(x, FishBehaviourProfile.EvaluateAnchorHeight(floorArea, data.WorldScale));
+            }
+
             if (!forceInsideBounds && config.SpawnStrategy == FishSpawnStrategy.EdgeEntry) {
                 Vector2 inward;
                 Vector2 entryPoint = bounds.RandomEdgeEntryPoint(config.BoundsPadding, out inward);

@@ -27,6 +27,12 @@ namespace ViitorCloud.FishAquarium.Fish {
         Payload = 0,
 
         /// <summary> No personality block, so every trait was derived from the identity hash. Legacy captures and folder fish. </summary>
-        DerivedFromIdentity = 1
+        DerivedFromIdentity = 1,
+
+        /// <summary>
+        /// Blended from two parents. A baby, which was never drawn and never archived - Python has no
+        /// record of it, so this personality exists only in Unity. Design point 5.
+        /// </summary>
+        Inherited = 2
     }
 }

@@ -19,7 +19,12 @@ namespace ViitorCloud.FishAquarium.Fish {
         /// <summary> Below this the classifier is guessing, so type-specific VFX are skipped. </summary>
         public const float ConfidentClassificationThreshold = 0.5f;
 
-        public FishTraits(string identity, float speed, float curiosity, float fear, float social, float aggression, float grace, float preferredDepth, float rarityScore, FishRarityTier rarityTier, FishObjectType objectType, float objectConfidence, FishTraitSource source) {
+        public FishTraits(string identity, float speed, float curiosity, float fear, float social, float aggression, float grace, float preferredDepth, float rarityScore, FishRarityTier rarityTier, FishObjectType objectType, float objectConfidence, FishTraitSource source)
+            : this(identity, speed, curiosity, fear, social, aggression, grace, preferredDepth, rarityScore, rarityTier, objectType, objectConfidence, source, Color.white) {
+        }
+
+        public FishTraits(string identity, float speed, float curiosity, float fear, float social, float aggression, float grace, float preferredDepth, float rarityScore, FishRarityTier rarityTier, FishObjectType objectType, float objectConfidence, FishTraitSource source, Color dominantColour) {
+            DominantColour = dominantColour;
             Identity = string.IsNullOrEmpty(identity) ? string.Empty : identity;
             Speed = Mathf.Clamp01(speed);
             Curiosity = Mathf.Clamp01(curiosity);
@@ -74,6 +79,17 @@ namespace ViitorCloud.FishAquarium.Fish {
         public float ObjectConfidence { get; private set; }
 
         public FishTraitSource Source { get; private set; }
+
+        /// <summary>
+        /// The drawing's strongest colour, as Python measured it - features.dominant_colors[0]. White when
+        /// the payload carried none.
+        ///
+        /// Carried here rather than sampled from the texture on purpose. "No image analysis in Unity" is
+        /// an explicit non-goal of the brief, and Python already holds the segmentation mask and has done
+        /// this properly; a Unity-side average of a flattened PNG would be both worse and inconsistent
+        /// with the archive. Used to tint a baby, which inherits a blend of its parents' colours.
+        /// </summary>
+        public Color DominantColour { get; private set; }
 
         /// <summary>
         /// True when the classification is firm enough to act on visually. A low-confidence drawing still

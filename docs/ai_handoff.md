@@ -5,9 +5,17 @@ assumption another agent continues tomorrow with no memory of this session.
 
 **Last updated:** 2026-09-02
 **Branch:** `development`
-**State:** M0 through M4 complete. 235 edit-mode tests, all passing. Project compiles clean, and
-ingest, locomotion, pointer interaction, schooling, recognition and feeding have all been measured in
-play mode.
+**State:** **M0 through M9 complete.** 376 edit-mode tests, all passing. Project compiles clean, and
+every milestone's acceptance criterion has been measured in play mode rather than assumed.
+
+**M10 is deliberately not built.** Section 10 of [interaction_contract.md](interaction_contract.md)
+lists `challenge_set` / `challenge_result` as reserved and says *"Do not build against these yet."*
+Nothing here touches them, and there is no Unity-to-Python send path beyond the Socket.IO handshake.
+
+Two smaller pieces are also outstanding on purpose - the microphone (optional in the brief) and
+tail-bone deformation (waits on Python's `anatomy` block, which is null on every payload today). Both
+are in [tasks.md](tasks.md) under "What is left", with the reasoning in
+[decisions.md](decisions.md) D-010.
 
 > **If the Editor stops compiling.** It wedged once during this work: script compilation was requested
 > and never ran, and `Library/ScriptAssemblies` went stale while the Editor stayed otherwise
@@ -16,61 +24,54 @@ play mode.
 > than spending time on it. If Unity is unavailable altogether, the section at the bottom of this file
 > shows how to compile and exercise the code with Unity's own Roslyn and Mono.
 
----
+## What was built
 
-## What changed this session
+The aquarium started as a fish slideshow: schema v1 payloads, and a personality rolled from
+`UnityEngine.Random` for every fish. That contradicted the one guarantee the installation rests on, so
+the identity path was rebuilt around a deterministic hash and the rest of the milestones were built on
+top of that.
 
-The aquarium accepted schema v1 payloads and gave every fish a personality rolled from
-`UnityEngine.Random`. That directly contradicted the guarantee the whole installation rests on -
-section 6 of the interaction contract - so the identity path was rebuilt around a deterministic hash,
-the wire types were brought up to schema v2, duplicate captures are now rejected, and the visitor can
-interact with the tank through an abstraction that a hand tracker could later replace.
-
-### New files
-
-| File | Why |
+| Milestone | What it added |
 |---|---|
-| `Scripts/Core/StableHash.cs` | FNV-1a 64 over UTF-8. The seed everything deterministic hangs off. |
-| `Scripts/Core/DeterministicRandom.cs` | SplitMix64 stream, with domain separation. |
-| `Scripts/Fish/FishTraits.cs` | The immutable personality every behaviour reads. |
-| `Scripts/Fish/FishTraitEnums.cs` | `FishObjectType`, `FishRarityTier`, `FishTraitSource`. |
-| `Scripts/Fish/FishTraitFallback.cs` | Contract section 9, the deterministic fallback. |
-| `Scripts/Network/FishTraitResolver.cs` | Wire payload to `FishTraits`. |
-| `Scripts/Network/FishCaptureRegistry.cs` | Contract section 8, dedupe by `id`. |
-| `Scripts/Input/IPointerSource.cs` | The visitor, abstracted. |
-| `Scripts/Input/MousePointerSource.cs` | The only implementation today. |
-| `Scripts/Input/PointerInfluence.cs` | Interaction rules as pure, testable functions. |
-| `Scripts/Input/RippleField.cs` | Click shockwaves and their danger zones. |
-| `Scripts/Fish/FishSpatialHash.cs` | Uniform grid replacing the O(n²) neighbour sweep. |
-| `Scripts/Fish/FishFlocking.cs` | Alignment, cohesion, and the pull of a new arrival. |
-| `Scripts/Aquarium/FoodField.cs` | Food: sinking, staling, and who gets it. |
-| `Scripts/Aquarium/FoodRenderer.cs` | Draws it. Presentational only, never writes to the field. |
+| M0 | Dedupe by `id`, schema-version tolerance, null-block survival |
+| M1 | Schema v2 wire types, `FishTraits`, deterministic fallback, trait-driven motion |
+| M2 | `IPointerSource`, approach/flee, startle, ripples, affection |
+| M3 | `FishSpatialHash`, alignment and cohesion by `social`, new-arrival recognition |
+| M4 | `FoodField`, surface-press feeding, `aggression` deciding who eats |
+| M5 | Roster and artwork persistence, capture-id seeding, birth moment, created-today tally |
+| M6 | Energy, currents, day/night, storms, a procedural predator, departure |
+| M7 | Bonds, eggs, babies with blended traits and colour |
+| M8 | Per-`object_type` behaviour: anchoring, pulsing, predation, the confidence gate |
+| M9 | Rarity glow and trails, the anatomy y flip, eye highlights |
 
-### Modified files
+Every acceptance criterion was measured rather than assumed; the figures are in
+[roadmap.md](roadmap.md) under each milestone.
 
-`Scripts/Network/FishCaptureMessage.cs` (schema v2 blocks), `FishPayloadDecodeQueue.cs` (dedupe and
-trait resolution on the worker), `SocketFishIngestService.cs` (new factory call, schema logging),
-`Scripts/Core/AquariumConfig.cs` (trait response, preferred depth and pointer blocks),
-`AquariumManager.cs` (owns the pointer source and ripple field), `IFishIngestService.cs`
-(`DuplicateCount`), `Scripts/Fish/FishData.cs` (trait-driven, no `Random`), `FishFactory.cs`,
-`FishMovement.cs` (pointer, startle, affection, depth band), `FishDepthProfile.cs`,
-`FishSizeNormalizer.cs`, `Scripts/Input/FishLoadQueue.cs`, `FishIngestService.cs`,
-`Scripts/Debug/DebugOverlay.cs`, `SocketPayloadSelfTest.cs` (now emits schema v2).
+### The files most worth knowing about
 
-### Scene
+`Scripts/Core/`: `StableHash` and `DeterministicRandom` (the determinism guarantee),
+`AquariumManager` (the hub - population, pointer, ripples, food, world systems, bonds, eggs),
+`AquariumPersistenceService`, `AquariumEnergy`, `CaptureCalendar`.
 
-`Scenes/Aquarium.unity`: a `MousePointerSource` was added to the `AquariumManager` GameObject and
-assigned to that object's `AquariumManager.pointerSourceBehaviour`, with its camera pointed at
-`Main Camera`. **Without that reference the tank runs but reacts to nothing** - the overlay says
-`Pointer: NOT ASSIGNED` when it is missing.
+`Scripts/Fish/`: `FishTraits` and `FishTraitFallback`, `FishSpatialHash`, `FishFlocking`,
+`FishBondRegistry`, `EggField`, `FishTraitBlend`, `FishBehaviourProfile`, `FishRarityProfile`,
+`FishArtworkCache`.
 
-### New tests
+`Scripts/Aquarium/`: `FoodField`, `AquariumFlow`, `AquariumCycle`, `AquariumPredator`, and a renderer
+per visible field.
 
-`DeterministicIdentityTests`, `FishTraitResolutionTests`, `FishCaptureRegistryTests`,
-`PointerInfluenceTests`, `RippleFieldTests`, `FishCaptureSchemaV2Tests`, plus additions to
-`FishDepthProfileTests` and `FishSizeNormalizerTests`.
+`Scripts/Network/`: `FishTraitResolver` and `FishAnatomyLandmarks` - the two places wire types are
+translated into domain types.
 
----
+### Scene wiring, all of it required
+
+`Scenes/Aquarium.unity` gained: a `MousePointerSource` on the `AquariumManager` object (assigned to
+its `pointerSourceBehaviour`), an `AquariumPersistenceService` on `Bootstrap` (with both ingest
+services in its array), and `Food`, `Eggs` and `Predator` objects carrying their renderers.
+`AquariumBackground` and `BubbleSystem` were also given the manager, which is how they read the mood.
+
+**A missing reference degrades silently rather than erroring.** No pointer means the tank reacts to
+nothing; no persistence service means it never saves. The debug overlay reports both.
 
 ## The three things most likely to trip you up
 
@@ -183,9 +184,19 @@ account.
 
 ## Next recommended task
 
-**M5, persistence.** Breakdown in [tasks.md](tasks.md). Read item 1 before writing anything: the
-session-only capture registry will duplicate the whole tank on every restart unless it is dealt with,
-which would undo M0.
+There is no next milestone that can be started: M10 is blocked by the contract, and the two remaining
+pieces both wait on something outside Unity. See "What is left" in [tasks.md](tasks.md).
+
+The most useful things to do instead, in order:
+
+1. **Run a player build with `maxFishCount` raised** and confirm the frame budget at 200 fish. The
+   flocking pass is measured at 0.671 ms, but the editor caps itself at 60 fps with vSync so total
+   headroom was never measurable.
+2. **Put a PNG in `Assets/StreamingAssets/Sample/`** so the F5/F6/F7 self-test keys work.
+3. **Tune the response curves on `AquariumConfig`.** Everything trait-driven runs through them, and
+   they were given sensible defaults rather than art direction.
+4. **Re-serialise `AquariumConfig.asset`.** Every field added across these milestones exists only as a
+   C# field initialiser; it works, but a default changed in code silently changes an installation.
 
 Before writing anything, read AGENTS.md at the repository root. Its rules on style, `var`, expression
 bodies and brace placement are strict and are enforced by `.editorconfig`; the existing code follows

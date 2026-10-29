@@ -154,6 +154,7 @@ MonoBehaviour:
   bounds: {fileID: 170297848}
   fishContainer: {fileID: 472625472}
   pointerSourceBehaviour: {fileID: 170297850}
+  fishFactory: {fileID: 233870669}
 --- !u!114 &170297848
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -237,6 +238,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: FishAquarium::ViitorCloud.FishAquarium.Aquarium.AquariumBackground
   targetCamera: {fileID: 633293358}
+  aquariumManager: {fileID: 170297847}
   deepWaterColour: {r: 0.03, g: 0.15, b: 0.24, a: 1}
   shallowWaterColour: {r: 0.09, g: 0.42, b: 0.52, a: 1}
   floorColour: {r: 0.08, g: 0.12, b: 0.14, a: 1}
@@ -451,6 +453,51 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &571314210
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 571314212}
+  - component: {fileID: 571314211}
+  m_Layer: 0
+  m_Name: Predator
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &571314211
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 571314210}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6100142e9625d03409291a347132e8dc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: FishAquarium::ViitorCloud.FishAquarium.Aquarium.PredatorRenderer
+  aquariumManager: {fileID: 170297847}
+--- !u!4 &571314212
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 571314210}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &633293357
 GameObject:
   m_ObjectHideFlags: 0
@@ -529,6 +576,51 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: -10}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1056212985
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1056212987}
+  - component: {fileID: 1056212986}
+  m_Layer: 0
+  m_Name: Eggs
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1056212986
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1056212985}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4aae8ab348aee0841b6bf75ebffd1d70, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: FishAquarium::ViitorCloud.FishAquarium.Aquarium.EggRenderer
+  aquariumManager: {fileID: 170297847}
+--- !u!4 &1056212987
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1056212985}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -691,6 +783,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1615776449}
   - component: {fileID: 1615776448}
+  - component: {fileID: 1615776450}
   m_Layer: 0
   m_Name: Bootstrap
   m_TagString: Untagged
@@ -728,6 +821,24 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1615776450
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1615776447}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f80c41f91b3f60e449a04f1ce6d422bb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: FishAquarium::ViitorCloud.FishAquarium.Core.AquariumPersistenceService
+  config: {fileID: 11400000, guid: f8562ab556bf274499f492f4871de492, type: 2}
+  aquariumManager: {fileID: 170297847}
+  fishFactory: {fileID: 233870669}
+  fishIngestServiceBehaviours:
+  - {fileID: 233870671}
+  - {fileID: 233870668}
 --- !u!1 &1720279040
 GameObject:
   m_ObjectHideFlags: 0
@@ -814,6 +925,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: FishAquarium::ViitorCloud.FishAquarium.Aquarium.BubbleSystem
   targetCamera: {fileID: 633293358}
+  aquariumManager: {fileID: 170297847}
+  energyDensityMultiplier: 2.2
   bubblePrefab: {fileID: 1923697510893261163, guid: b9f95d5f6237f314cb704bab0d1c42cf, type: 3}
   poolSize: 40
   spawnIntervalSeconds: 0.4
@@ -852,3 +965,5 @@ SceneRoots:
   - {fileID: 1184281247}
   - {fileID: 1615776449}
   - {fileID: 1464963447}
+  - {fileID: 571314212}
+  - {fileID: 1056212987}

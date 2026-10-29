@@ -31,6 +31,8 @@ namespace ViitorCloud.FishAquarium.Fish {
 
         private Vector2 currentTarget;
         private Vector2 pendingFoodPull;
+        private Vector2 pendingPredatorFlee;
+        private float predatorPanic;
         private float headingDegrees;
         private float currentSpeed;
         private float depthSpeedMultiplier = 1f;
@@ -39,6 +41,13 @@ namespace ViitorCloud.FishAquarium.Fish {
         private float currentPitch;
         private float affection;
         private float startleTimer;
+        private bool anchors;
+        private bool swims;
+        private bool flocks;
+        private bool pulses;
+        private bool sways;
+        private float anchorHeight;
+        private float typePhase;
         private bool isIdle;
         private bool facingPositiveX = true;
         private bool initialised;
@@ -86,6 +95,14 @@ namespace ViitorCloud.FishAquarium.Fish {
             get { return startleTimer > 0f; }
         }
 
+        /// <summary>
+        /// Puts back an affection value loaded from disk. Clamped, because a save file is not trusted
+        /// input - it can be hand-edited, and a corrupt one must not produce a fish with impossible trust.
+        /// </summary>
+        public void RestoreAffection(float value) {
+            affection = Mathf.Clamp01(value);
+        }
+
         public void Initialize(FishController fishOwner, FishData fishData, AquariumConfig aquariumConfig, AquariumBounds aquariumBounds, AquariumManager manager, SpriteRenderer renderer, Vector2 initialHeading) {
             owner = fishOwner;
             data = fishData;
@@ -97,6 +114,8 @@ namespace ViitorCloud.FishAquarium.Fish {
 
             depthSpeedMultiplier = FishDepthProfile.EvaluateSpeedMultiplier(data.Depth, config.DepthSpeedInfluence);
             noiseTime = data.NoiseSeed;
+
+            ResolveBehaviourProfile();
 
             Vector2 heading = initialHeading.sqrMagnitude > DirectionEpsilon ? initialHeading.normalized : Vector2.right;
             headingDegrees = FishSteering.HeadingDegrees(heading);
@@ -119,6 +138,15 @@ namespace ViitorCloud.FishAquarium.Fish {
             Rect area = bounds.GetPaddedArea(config.BoundsPadding);
             Vector2 position = Position;
 
+            typePhase += deltaTime;
+
+            // Plants and rocks do not swim anywhere. They hold their spot on the floor, and a plant leans.
+            // Contract section 5.
+            if (anchors) {
+                TickAnchored(area, deltaTime);
+                return;
+            }
+
             UpdatePointerState(position, deltaTime);
 
             // Queried before target selection, and only once a frame, because a resting fish has to be
@@ -126,7 +154,13 @@ namespace ViitorCloud.FishAquarium.Fish {
             // it hovering next to a meal it never took.
             pendingFoodPull = aquariumManager != null ? aquariumManager.CalculateFoodAttraction(owner, position, data.Traits) : Vector2.zero;
 
-            if (pendingFoodPull.sqrMagnitude > DirectionEpsilon) {
+            // Resolved once a frame for the same reason as the food pull: a resting fish has to be woken
+            // by a threat, and steering it while its goal speed was zero would leave it hovering.
+            pendingPredatorFlee = aquariumManager != null
+                ? aquariumManager.CalculatePredatorFlee(position, data.Traits.Fear, out predatorPanic)
+                : Vector2.zero;
+
+            if (pendingFoodPull.sqrMagnitude > DirectionEpsilon || predatorPanic > 0f) {
                 isIdle = false;
                 idleTimer = 0f;
             }
@@ -144,16 +178,111 @@ namespace ViitorCloud.FishAquarium.Fish {
             // A bolting fish is faster than it has any business being, and gets there quickly. Without the
             // acceleration bump the extra speed arrives after the moment that caused it has passed.
             float startleBoost = startleTimer > 0f ? config.StartleSpeedMultiplier : 1f;
-            float goalSpeed = isIdle ? 0f : data.Speed * depthSpeedMultiplier * startleBoost;
-            currentSpeed = Mathf.MoveTowards(currentSpeed, goalSpeed, data.Acceleration * startleBoost * deltaTime);
+
+            // Panic beats a startle: a predator is a bigger deal than a fast mouse, so the larger of the
+            // two multipliers wins rather than the two compounding into something absurd.
+            float panicBoost = Mathf.Lerp(1f, config.PredatorPanicSpeedMultiplier, predatorPanic);
+            float urgency = Mathf.Max(startleBoost, panicBoost);
+
+            // The tank's mood lifts everyone together. Design point 11.
+            float energyBoost = aquariumManager != null ? aquariumManager.EnergySpeedMultiplier : 1f;
+
+            float driftFactor = pulses ? config.JellyfishDriftFactor : 1f;
+            float goalSpeed = isIdle ? 0f : data.Speed * depthSpeedMultiplier * urgency * energyBoost * driftFactor;
+            currentSpeed = Mathf.MoveTowards(currentSpeed, goalSpeed, data.Acceleration * urgency * deltaTime);
 
             Vector2 direction = FishSteering.DirectionFromHeading(headingDegrees);
             Vector2 moved = position + (direction * currentSpeed * deltaTime);
+
+            if (pulses) {
+                moved.y += EvaluatePulseVelocity() * deltaTime;
+            }
+
             moved = FishSteering.ClampInside(moved, area);
 
             cachedTransform.position = new Vector3(moved.x, moved.y, cachedTransform.position.z);
 
             ApplyOrientation(direction, deltaTime);
+        }
+
+        /// <summary>
+        /// Reads the behaviour flags for this drawing's type once, at spawn. Contract section 5.
+        ///
+        /// Cached rather than queried per frame, and the type never changes after the fact: Python has
+        /// already decided, and a creature that reclassified itself mid-swim would be indefensible.
+        /// </summary>
+        private void ResolveBehaviourProfile() {
+            FishObjectType type = data.Traits != null ? data.Traits.ObjectType : FishObjectType.Fish;
+
+            if (!config.ObjectTypeBehavioursEnabled) {
+                // Everything behaves as a fish. The switch exists so an installation can fall back to the
+                // pre-M8 behaviour if a classifier regression makes the tank look wrong on site.
+                type = FishObjectType.Fish;
+            }
+
+            anchors = FishBehaviourProfile.Anchors(type);
+            swims = FishBehaviourProfile.Swims(type);
+            flocks = FishBehaviourProfile.Flocks(type);
+            pulses = FishBehaviourProfile.Pulses(type);
+            sways = FishBehaviourProfile.Sways(type);
+
+            // Offset so a bed of plants does not lean in unison and a clutch of jellyfish does not pulse
+            // as one. The same per-fish phase the tail beat uses.
+            typePhase = data.AnimationPhase;
+
+            if (!anchors) {
+                return;
+            }
+
+            Rect area = bounds.GetPaddedArea(config.BoundsPadding);
+            float worldHeight = spriteRenderer != null && spriteRenderer.sprite != null
+                ? spriteRenderer.sprite.bounds.size.y * data.WorldScale
+                : 1f;
+
+            anchorHeight = FishBehaviourProfile.EvaluateAnchorHeight(area, worldHeight);
+        }
+
+        /// <summary>
+        /// A plant or a rock: it stays where it was put, on the floor. A plant leans back and forth; a
+        /// rock does nothing at all, which is the point of a rock.
+        /// </summary>
+        private void TickAnchored(Rect area, float deltaTime) {
+            Vector2 resting = new Vector2(cachedTransform.position.x, anchorHeight);
+            cachedTransform.position = new Vector3(resting.x, resting.y, cachedTransform.position.z);
+
+            currentSpeed = 0f;
+
+            if (!sways) {
+                return;
+            }
+
+            float lean = Mathf.Sin((typePhase * config.PlantSwaySpeed * Mathf.PI * 2f)) * config.PlantSwayDegrees;
+            cachedTransform.localRotation = Quaternion.Euler(0f, 0f, lean);
+        }
+
+        /// <summary>
+        /// Vertical speed of a jellyfish's pulse. A sine wave rather than a spring, because a bell's
+        /// motion is periodic and does not settle.
+        /// </summary>
+        private float EvaluatePulseVelocity() {
+            return Mathf.Sin(typePhase * config.JellyfishPulseSpeed * Mathf.PI * 2f) * config.JellyfishPulseAmplitude;
+        }
+
+        /// <summary>
+        /// How much a jellyfish brightens as it pulses, 0 when it is not one.
+        ///
+        /// This is the type-specific effect that contract section 5 asks to be skipped when
+        /// object_confidence is below 0.5: a low-confidence jellyfish still drifts and pulses, because
+        /// that is behaviour and a wrong jellyfish is better than a rejected drawing, but it does not get
+        /// the glow that would announce the classifier's guess as a fact.
+        /// </summary>
+        public float EvaluateTypeGlow() {
+            if (!pulses || data.Traits == null || !data.Traits.IsClassificationConfident) {
+                return 0f;
+            }
+
+            float wave = (Mathf.Sin(typePhase * config.JellyfishPulseSpeed * Mathf.PI * 2f) * 0.5f) + 0.5f;
+            return wave * config.JellyfishGlowAmount;
         }
 
         /// <summary> Forces a new destination, used when the aquarium is resized under the fish. </summary>
@@ -286,7 +415,7 @@ namespace ViitorCloud.FishAquarium.Fish {
             // Separation, alignment, cohesion and the pull of a new arrival, all from one neighbour query.
             Vector2 flocking = Vector2.zero;
             if (aquariumManager != null) {
-                flocking = aquariumManager.CalculateFlocking(owner, position, FishSteering.DirectionFromHeading(headingDegrees), data.Traits);
+                flocking = aquariumManager.CalculateFlocking(owner, position, FishSteering.DirectionFromHeading(headingDegrees), data.Traits, flocks);
             }
 
             Vector2 pointerForce = BuildPointerForce(position);
@@ -294,7 +423,11 @@ namespace ViitorCloud.FishAquarium.Fish {
 
             // pendingFoodPull was resolved at the top of the tick, so the claim on a flake is staked once
             // per frame rather than once per steering evaluation.
-            Vector2 steer = desired + avoidance + flocking + pendingFoodPull + pointerForce + depthPull;
+            Vector2 current = aquariumManager != null ? aquariumManager.SampleCurrent(position) : Vector2.zero;
+            Vector2 departure = BuildDepartureSwim(area, position);
+
+            Vector2 steer = desired + avoidance + flocking + pendingFoodPull + pointerForce + depthPull +
+                            current + pendingPredatorFlee + departure;
             if (steer.sqrMagnitude <= DirectionEpsilon) {
                 return desired;
             }
@@ -336,6 +469,25 @@ namespace ViitorCloud.FishAquarium.Fish {
             }
 
             return force;
+        }
+
+        /// <summary>
+        /// Push towards the nearest side while a fish is being removed. Design point 25: the oldest fish
+        /// swim off and fade when the tank is full, rather than dissolving where they happen to float.
+        ///
+        /// Sideways rather than towards the true nearest edge, because leaving through the top or the
+        /// bottom of a tank does not read as leaving - it reads as sinking.
+        /// </summary>
+        private Vector2 BuildDepartureSwim(Rect area, Vector2 position) {
+            if (!config.DepartingFishSwimAway || owner == null || owner.State != FishLifecycleState.Removing) {
+                return Vector2.zero;
+            }
+
+            float towardsRight = area.xMax - position.x;
+            float towardsLeft = position.x - area.xMin;
+            float direction = towardsRight <= towardsLeft ? 1f : -1f;
+
+            return new Vector2(direction * config.DepartureSwimStrength, 0f);
         }
 
         /// <summary>

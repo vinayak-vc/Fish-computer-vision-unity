@@ -3,6 +3,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 
+using UnityEngine;
+
 using ViitorCloud.FishAquarium.Fish;
 
 namespace ViitorCloud.FishAquarium.Network {
@@ -34,6 +36,24 @@ namespace ViitorCloud.FishAquarium.Network {
 
             /// <summary> Mask area Python measured, which is what the on-screen size comes from. </summary>
             public int ForegroundArea { get; set; }
+
+            /// <summary> Capture timestamp, ISO 8601 with no timezone. Feeds the "created today" tally. </summary>
+            public string Timestamp { get; set; }
+
+            /// <summary> Monotonic counter within the capture station's output directory. </summary>
+            public int Sequence { get; set; }
+
+            /// <summary>
+            /// Where to draw the eye highlight, as a sprite UV, and how big. Resolved on the worker from
+            /// Python's anatomy landmark when there is one and from geometry otherwise - which today is
+            /// always, the anatomy block being null until Python phase 2.
+            /// </summary>
+            public Vector2 EyeUv { get; set; }
+
+            public float EyeRadius { get; set; }
+
+            /// <summary> Tail landmark, resolved and carried ready for the deformation of design point 26. </summary>
+            public Vector2 TailUv { get; set; }
         }
 
         private readonly ConcurrentQueue<DecodedFish> ready = new ConcurrentQueue<DecodedFish>();
@@ -136,6 +156,17 @@ namespace ViitorCloud.FishAquarium.Network {
             registry.Clear();
         }
 
+        /// <summary> Marks ids restored from a save file as already processed. See IFishIngestService. </summary>
+        public void SeedKnownCaptures(IList<string> captureIds) {
+            if (captureIds == null) {
+                return;
+            }
+
+            for (int i = 0; i < captureIds.Count; i++) {
+                registry.TryClaim(captureIds[i]);
+            }
+        }
+
         public void Clear() {
             DecodedFish discarded;
             while (ready.TryDequeue(out discarded)) {
@@ -194,7 +225,21 @@ namespace ViitorCloud.FishAquarium.Network {
                 decoded.Height = message.height;
                 decoded.SchemaVersion = message.schema_version;
                 decoded.ForegroundArea = message.foreground_area;
+                decoded.Timestamp = message.timestamp;
+                decoded.Sequence = message.sequence;
                 decoded.Traits = FishTraitResolver.Resolve(message);
+
+                // The landmark flip happens here, on the worker, so the one place it is written is the one
+                // place it is tested. Contract section 7.
+                float orientation = message.features != null ? message.features.orientation_deg : 0f;
+
+                Vector2 eyeUv;
+                float eyeRadius;
+                FishAnatomyLandmarks.ResolveEye(message.anatomy, orientation, out eyeUv, out eyeRadius);
+
+                decoded.EyeUv = eyeUv;
+                decoded.EyeRadius = eyeRadius;
+                decoded.TailUv = FishAnatomyLandmarks.ResolveTailUv(message.anatomy, orientation);
 
                 ready.Enqueue(decoded);
                 Interlocked.Increment(ref decodedTotal);

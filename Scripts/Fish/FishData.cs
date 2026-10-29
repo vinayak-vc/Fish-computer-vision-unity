@@ -23,6 +23,7 @@ namespace ViitorCloud.FishAquarium.Fish {
             SourceFilePath = sourceFilePath;
             Sprite = sprite;
             Traits = traits;
+            IsPersistable = true;
         }
 
         public int Id { get; private set; }
@@ -37,10 +38,23 @@ namespace ViitorCloud.FishAquarium.Fish {
         /// <summary> The personality Python assigned to this drawing. Immutable, and never re-derived here. </summary>
         public FishTraits Traits { get; private set; }
 
+        /// <summary>
+        /// Whether this fish belongs in the save file. False only for babies, which were never drawn and
+        /// have no archived artwork to rebuild from.
+        /// </summary>
+        public bool IsPersistable { get; private set; }
+
         public Vector2 SpawnPosition { get; private set; }
 
         /// <summary> Uniform transform scale that normalises the source PNG to the configured world size. </summary>
         public float WorldScale { get; private set; }
+
+        /// <summary>
+        /// Mask area Python measured, in source pixels, or zero when none was supplied. Held so a restored
+        /// fish comes back the size it was: on-screen size is derived from this rather than from the
+        /// texture, so losing it across a restart would silently resize every fish.
+        /// </summary>
+        public int ForegroundArea { get; private set; }
 
         public float Speed { get; private set; }
 
@@ -129,6 +143,26 @@ namespace ViitorCloud.FishAquarium.Fish {
         }
 
         public void SetWorldScale(float scale) {
+            WorldScale = scale;
+        }
+
+        public void SetForegroundArea(int area) {
+            ForegroundArea = area;
+        }
+
+        /// <summary>
+        /// Marks this fish as one that must not be written to the save file.
+        ///
+        /// Used for babies. Design point 5 is explicit that a baby is not an archived capture - Python
+        /// never hears about it and holds no artwork for it - so there would be nothing to rebuild one
+        /// from on the next start. A baby is a creature of this session.
+        /// </summary>
+        public void MarkAsUnpersistable() {
+            IsPersistable = false;
+        }
+
+        /// <summary> Overrides the calculated size. Used for a baby, which is smaller than the drawing it wears. </summary>
+        public void OverrideWorldScale(float scale) {
             WorldScale = scale;
         }
     }

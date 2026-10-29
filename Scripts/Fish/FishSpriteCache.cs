@@ -90,6 +90,33 @@ namespace ViitorCloud.FishAquarium.Fish {
             return true;
         }
 
+        /// <summary>
+        /// Takes another reference on a drawing already in the cache, without being able to load it.
+        ///
+        /// For a baby, which wears a parent's drawing. It must not load from disk or from bytes: if the
+        /// parent's texture has already gone, the right answer is that the baby cannot hatch, not that
+        /// the aquarium goes looking for artwork it has no source for.
+        /// </summary>
+        public static bool TryAcquireExisting(string key, out Sprite sprite, out string error) {
+            sprite = null;
+            error = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(key)) {
+                error = "empty sprite key";
+                return false;
+            }
+
+            CacheEntry existing;
+            if (!entries.TryGetValue(key, out existing) || existing.Sprite == null) {
+                error = "that drawing is no longer cached";
+                return false;
+            }
+
+            existing.ReferenceCount++;
+            sprite = existing.Sprite;
+            return true;
+        }
+
         /// <summary> Drops one reference. The sprite and its texture are destroyed when the count reaches zero. </summary>
         public static void Release(string absolutePath) {
             if (string.IsNullOrWhiteSpace(absolutePath)) {
